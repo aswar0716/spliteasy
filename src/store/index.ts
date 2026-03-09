@@ -3,41 +3,35 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Friend, HistoryEntry, JournalEntry } from '../types';
 import { Colors } from '../theme';
 
-// ─── Keys ─────────────────────────────────────────────────────────────────────
-
 const KEYS = {
   friends: '@spliteasy/friends',
   history: '@spliteasy/history',
   journal: '@spliteasy/journal',
+  geminiKey: '@spliteasy/geminiKey',
 };
-
-// ─── State ────────────────────────────────────────────────────────────────────
 
 type AppStore = {
   friends: Friend[];
   history: HistoryEntry[];
   journal: JournalEntry[];
+  geminiKey: string;
   hydrated: boolean;
 
-  // friends
   addFriend: (name: string) => void;
   removeFriend: (id: string) => void;
   renameFriend: (id: string, name: string) => void;
 
-  // history
   addHistory: (entry: HistoryEntry) => void;
   removeHistory: (id: string) => void;
 
-  // journal
   addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'date'>) => void;
   updateJournalEntry: (id: string, patch: Partial<JournalEntry>) => void;
   removeJournalEntry: (id: string) => void;
 
-  // hydration
+  setGeminiKey: (key: string) => void;
+
   hydrate: () => Promise<void>;
 };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -56,20 +50,16 @@ async function load<T>(key: string, fallback: T): Promise<T> {
   }
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────────
-
 export const useStore = create<AppStore>((set, get) => ({
   friends: [],
   history: [],
   journal: [],
+  geminiKey: '',
   hydrated: false,
-
-  // ── Friends ──────────────────────────────────────────────────────────────
 
   addFriend: (name: string) => {
     const { friends } = get();
-    const color =
-      Colors.friendColors[friends.length % Colors.friendColors.length];
+    const color = Colors.friendColors[friends.length % Colors.friendColors.length];
     const newFriend: Friend = { id: genId(), name: name.trim(), color };
     const updated = [...friends, newFriend];
     set({ friends: updated });
@@ -90,8 +80,6 @@ export const useStore = create<AppStore>((set, get) => ({
     persist(KEYS.friends, updated);
   },
 
-  // ── History ──────────────────────────────────────────────────────────────
-
   addHistory: (entry: HistoryEntry) => {
     const updated = [entry, ...get().history];
     set({ history: updated });
@@ -103,8 +91,6 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ history: updated });
     persist(KEYS.history, updated);
   },
-
-  // ── Journal ──────────────────────────────────────────────────────────────
 
   addJournalEntry: (entry) => {
     const newEntry: JournalEntry = {
@@ -131,14 +117,18 @@ export const useStore = create<AppStore>((set, get) => ({
     persist(KEYS.journal, updated);
   },
 
-  // ── Hydration ────────────────────────────────────────────────────────────
+  setGeminiKey: (key: string) => {
+    set({ geminiKey: key });
+    AsyncStorage.setItem(KEYS.geminiKey, key);
+  },
 
   hydrate: async () => {
-    const [friends, history, journal] = await Promise.all([
+    const [friends, history, journal, geminiKeyRaw] = await Promise.all([
       load<Friend[]>(KEYS.friends, []),
       load<HistoryEntry[]>(KEYS.history, []),
       load<JournalEntry[]>(KEYS.journal, []),
+      AsyncStorage.getItem(KEYS.geminiKey),
     ]);
-    set({ friends, history, journal, hydrated: true });
+    set({ friends, history, journal, geminiKey: geminiKeyRaw ?? '', hydrated: true });
   },
 }));

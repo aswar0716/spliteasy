@@ -34,7 +34,13 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow SplitEasy to read your receipt photos."
+        }
+      ]
     ]
   }
 }

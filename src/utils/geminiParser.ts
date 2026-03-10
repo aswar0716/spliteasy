@@ -1,5 +1,4 @@
-const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
 export type ParsedReceipt = {
   items: ParsedItem[];
@@ -41,32 +40,38 @@ export async function parseReceiptImage(
   mimeType: 'image/jpeg' | 'image/png',
   apiKey: string,
 ): Promise<ParsedReceipt> {
-  const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+  const response = await fetch(OPENAI_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      contents: [
+      model: 'gpt-4o-mini',
+      max_tokens: 2048,
+      temperature: 0.1,
+      messages: [
         {
-          parts: [
-            { inlineData: { mimeType, data: base64Image } },
-            { text: PROMPT },
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,${base64Image}` },
+            },
+            { type: 'text', text: PROMPT },
           ],
         },
       ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 2048,
-      },
     }),
   });
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Gemini API error: ${response.status} — ${err}`);
+    throw new Error(`OpenAI API error: ${response.status} — ${err}`);
   }
 
   const data = await response.json();
-  const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  const text: string = data?.choices?.[0]?.message?.content ?? '';
 
   // Strip markdown code fences if present
   const cleaned = text

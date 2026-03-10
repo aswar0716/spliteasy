@@ -13,11 +13,11 @@ export default function SettingsScreen() {
   const handleSave = () => {
     const trimmed = keyInput.trim();
     if (!trimmed) {
-      Alert.alert('Empty key', 'Paste your Gemini API key first.');
+      Alert.alert('Empty key', 'Paste your OpenAI API key first.');
       return;
     }
     setGeminiKey(trimmed);
-    Alert.alert('Saved', 'Gemini API key saved successfully.');
+    Alert.alert('Saved', 'OpenAI API key saved successfully.');
   };
 
   const handleClear = () => {
@@ -49,9 +49,9 @@ export default function SettingsScreen() {
           <SectionHeader title="🤖 AI Receipt Scanning" />
           <View style={{ gap: Spacing.md }}>
             <AppText variant="bodySmall">
-              Paste your Google Gemini API key to enable receipt photo scanning.
-              Get one free at{' '}
-              <AppText style={{ color: Colors.primary }}>aistudio.google.com</AppText>
+              Paste your OpenAI API key to enable receipt photo scanning.
+              Get one at{' '}
+              <AppText style={{ color: Colors.primary }}>platform.openai.com/api-keys</AppText>
             </AppText>
 
             {geminiKey ? (
@@ -79,7 +79,7 @@ export default function SettingsScreen() {
             <TextInput
               value={keyInput}
               onChangeText={setKeyInput}
-              placeholder="Paste Gemini API key here..."
+              placeholder="Paste OpenAI API key here (sk-...)..."
               placeholderTextColor={Colors.textMuted}
               secureTextEntry={!visible}
               autoCorrect={false}

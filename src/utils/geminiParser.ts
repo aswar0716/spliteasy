@@ -5,12 +5,12 @@ export type ParsedReceipt = {
   storeDiscount: number;  // % (e.g. 5 or 10)
   voucher: number;        // flat $ off
   extraFees: number;      // delivery/service/tax $
-  type: 'woolworths' | 'restaurant';
+  type: 'woolworths' | 'restaurant' | 'universal';
 };
 
 export type ParsedItem = {
   name: string;
-  price: number;          // original/listed price
+  price: number;          // original/shelf price
   productDiscount: number; // % off (0 if none)
 };
 
@@ -22,17 +22,18 @@ const PROMPT = `You are a receipt parser. Analyse this receipt image and return 
   "storeDiscount": number,
   "voucher": number,
   "extraFees": number,
-  "type": "woolworths" | "restaurant"
+  "type": "woolworths" | "restaurant" | "universal"
 }
 
 Rules:
-- "price" = the original/shelf price of the item (before any discount)
+- "price" = the original/shelf price before any discount
 - "productDiscount" = % discount on that specific item (0 if none)
-- "storeDiscount" = overall store/member discount % shown (0 if none); for Woolworths Everyday Rewards use 5 or 10
-- "voucher" = any flat dollar voucher or reward amount deducted (0 if none)
-- "extraFees" = delivery fee + service fee + any tax shown separately (0 if none)
-- "type" = "woolworths" for supermarkets/grocery stores, "restaurant" for restaurants/delivery/takeaway
-- Only include actual purchased items, not totals/subtotals
+- "storeDiscount" = overall store/member discount % (0 if none); for Woolworths Everyday Rewards use 5 or 10
+- "voucher" = any flat dollar voucher, reward, or promo code deducted (0 if none)
+- "extraFees" = delivery fee + service fee + surcharge + tax shown separately (0 if none)
+- "type" = "woolworths" for Woolworths/Coles/supermarkets, "restaurant" for restaurants/cafes/takeaway with no discounts, "universal" for anything else or if multiple discount types are present
+- Only include actual purchased items, not totals/subtotals/fees as items
+- Always extract ALL financial elements even if type is simple
 - Return ONLY the JSON object, nothing else`;
 
 export async function parseReceiptImage(
@@ -73,7 +74,6 @@ export async function parseReceiptImage(
   const data = await response.json();
   const text: string = data?.choices?.[0]?.message?.content ?? '';
 
-  // Strip markdown code fences if present
   const cleaned = text
     .replace(/```json\s*/gi, '')
     .replace(/```\s*/g, '')
@@ -81,7 +81,6 @@ export async function parseReceiptImage(
 
   try {
     const parsed = JSON.parse(cleaned) as ParsedReceipt;
-    // Sanitise numbers
     parsed.storeDiscount = Number(parsed.storeDiscount) || 0;
     parsed.voucher = Number(parsed.voucher) || 0;
     parsed.extraFees = Number(parsed.extraFees) || 0;

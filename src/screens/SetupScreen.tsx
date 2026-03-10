@@ -6,23 +6,46 @@ import { useStore } from '../store';
 import { AppText, Card, PillButton, SectionHeader } from '../components';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '../theme';
 
-type BillType = 'woolworths' | 'restaurant';
+type BillType = 'universal' | 'woolworths' | 'restaurant';
+
+const BILL_TYPES = [
+  {
+    type: 'universal' as BillType,
+    icon: '🧠',
+    label: 'Smart Split',
+    sub: 'Any bill — auto-detects discounts, fees, vouchers & more',
+    accent: Colors.primary,
+    badge: 'RECOMMENDED',
+  },
+  {
+    type: 'woolworths' as BillType,
+    icon: '🛒',
+    label: 'Woolworths',
+    sub: 'Store & product discounts, Everyday Rewards vouchers',
+    accent: Colors.info,
+    badge: null,
+  },
+  {
+    type: 'restaurant' as BillType,
+    icon: '🍽️',
+    label: 'Restaurant / DoorDash',
+    sub: 'Proportional delivery, service fees & surcharges',
+    accent: Colors.orange,
+    badge: null,
+  },
+] as const;
 
 export default function SetupScreen() {
   const navigation = useNavigation<any>();
   const { friends } = useStore();
 
   const [participants, setParticipants] = useState<string[]>([]);
-  const [billType, setBillType] = useState<BillType>('woolworths');
+  const [billType, setBillType] = useState<BillType>('universal');
 
   const toggleFriend = (id: string) => {
     setParticipants(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
     );
-  };
-
-  const handleNext = () => {
-    navigation.navigate('BillEntry', { participants, billType });
   };
 
   const meColor = Colors.primary;
@@ -33,7 +56,9 @@ export default function SetupScreen() {
 
         <View style={{ paddingTop: Spacing.sm }}>
           <AppText variant="h2">New Split</AppText>
-          <AppText variant="bodySmall" style={{ marginTop: 4 }}>Set up who's in and what type of bill</AppText>
+          <AppText variant="bodySmall" style={{ marginTop: 4 }}>
+            Set up who's in and what type of bill
+          </AppText>
         </View>
 
         {/* Who's splitting */}
@@ -41,7 +66,7 @@ export default function SetupScreen() {
           <SectionHeader title="Who's splitting?" />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm }}>
 
-            {/* Me — always shown, always included */}
+            {/* Me — always included */}
             <View style={{
               flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
               paddingVertical: Spacing.xs, paddingHorizontal: Spacing.md,
@@ -59,10 +84,9 @@ export default function SetupScreen() {
               </AppText>
             </View>
 
-            {/* Friends */}
             {friends.map(f => {
               const selected = participants.includes(f.id);
-              const initials = f.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+              const initials = f.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
               return (
                 <Pressable
                   key={f.id}
@@ -107,10 +131,7 @@ export default function SetupScreen() {
         <Card>
           <SectionHeader title="Type of bill" />
           <View style={{ gap: Spacing.sm }}>
-            {([
-              { type: 'woolworths', icon: '🛒', label: 'Woolworths', sub: 'Store & product discounts, vouchers', accent: Colors.info },
-              { type: 'restaurant', icon: '🍽️', label: 'Restaurant / DoorDash', sub: 'Proportional delivery & service fees', accent: Colors.orange },
-            ] as const).map(opt => (
+            {BILL_TYPES.map(opt => (
               <Pressable
                 key={opt.type}
                 onPress={() => setBillType(opt.type)}
@@ -123,12 +144,24 @@ export default function SetupScreen() {
                   opacity: pressed ? 0.8 : 1,
                 })}
               >
-                <AppText style={{ fontSize: 28 }}>{opt.icon}</AppText>
-                <View style={{ flex: 1 }}>
-                  <AppText style={{
-                    color: billType === opt.type ? opt.accent : Colors.textPrimary,
-                    fontWeight: FontWeight.semibold, fontSize: FontSize.md,
-                  }}>{opt.label}</AppText>
+                <AppText style={{ fontSize: 26 }}>{opt.icon}</AppText>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                    <AppText style={{
+                      color: billType === opt.type ? opt.accent : Colors.textPrimary,
+                      fontWeight: FontWeight.semibold, fontSize: FontSize.md,
+                    }}>{opt.label}</AppText>
+                    {opt.badge && (
+                      <View style={{
+                        backgroundColor: opt.accent + '33', borderRadius: Radius.sm,
+                        paddingHorizontal: 6, paddingVertical: 2,
+                      }}>
+                        <AppText style={{ color: opt.accent, fontSize: 9, fontWeight: FontWeight.bold }}>
+                          {opt.badge}
+                        </AppText>
+                      </View>
+                    )}
+                  </View>
                   <AppText variant="bodySmall">{opt.sub}</AppText>
                 </View>
                 <View style={{
@@ -147,8 +180,8 @@ export default function SetupScreen() {
         </Card>
 
         <PillButton
-          label={`Continue →`}
-          onPress={handleNext}
+          label="Continue →"
+          onPress={() => navigation.navigate('BillEntry', { participants, billType })}
           size="lg"
           style={{ marginTop: Spacing.sm }}
         />

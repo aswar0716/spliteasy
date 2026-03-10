@@ -1,7 +1,7 @@
 export type Friend = {
   id: string;
   name: string;
-  color: string; // for visual distinction
+  color: string;
 };
 
 // ─── Woolworths ───────────────────────────────────────────────────────────────
@@ -16,9 +16,9 @@ export type WoolworthsItem = {
 
 export type WoolworthsSession = {
   id: string;
-  date: string; // ISO string
+  date: string;
   storeDiscount: number; // 5 or 10 (%)
-  voucher: number; // flat dollar off (e.g. 10)
+  voucher: number;
   items: WoolworthsItem[];
 };
 
@@ -28,32 +28,52 @@ export type RestaurantItem = {
   id: string;
   name: string;
   price: number;
-  assignedTo: string[]; // friend ids; empty = just "me"; multiple = shared equally
+  assignedTo: string[];
 };
 
 export type RestaurantSession = {
   id: string;
   date: string;
-  label: string; // e.g. "Dinner at Nando's" or "DoorDash"
+  label: string;
   items: RestaurantItem[];
-  extraFees: number; // delivery, service, tax — always split proportionally
+  extraFees: number;
+};
+
+// ─── Universal (Smart Split) ──────────────────────────────────────────────────
+
+export type UniversalItem = {
+  id: string;
+  name: string;
+  originalPrice: number;
+  productDiscount: number; // % off per item (0 if none)
+  assignedTo: string[];
+};
+
+export type UniversalSession = {
+  id: string;
+  date: string;
+  label: string;
+  storeDiscount: number; // % (0 if none)
+  voucher: number;       // flat $ off
+  extraFees: number;     // delivery/service/tax $
+  items: UniversalItem[];
 };
 
 // ─── Split Results ────────────────────────────────────────────────────────────
 
 export type PersonSplit = {
-  friendId: string; // "me" for you
+  friendId: string;
   name: string;
-  subtotal: number; // before voucher/fees
-  discount: number; // savings
-  feeShare: number; // restaurant extra fees share
-  voucherSaving: number; // proportional voucher saving
-  total: number; // final amount owed
+  subtotal: number;
+  discount: number;
+  feeShare: number;
+  voucherSaving: number;
+  total: number;
 };
 
 export type SplitResult = {
-  session: WoolworthsSession | RestaurantSession;
-  type: 'woolworths' | 'restaurant';
+  session: WoolworthsSession | RestaurantSession | UniversalSession;
+  type: 'woolworths' | 'restaurant' | 'universal';
   splits: PersonSplit[];
   grandTotal: number;
 };
@@ -64,7 +84,7 @@ export type HistoryEntry = {
   id: string;
   date: string;
   label: string;
-  type: 'woolworths' | 'restaurant';
+  type: 'woolworths' | 'restaurant' | 'universal';
   grandTotal: number;
   splits: PersonSplit[];
 };
@@ -73,8 +93,8 @@ export type HistoryEntry = {
 
 export type JournalEntry = {
   id: string;
-  date: string; // ISO string
+  date: string;
   title: string;
   body: string;
-  type: 'dev' | 'personal'; // dev log or personal note
+  type: 'dev' | 'personal';
 };

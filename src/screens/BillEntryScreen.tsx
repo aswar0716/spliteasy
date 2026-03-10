@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
-  View, ScrollView, TextInput, Pressable, Alert, ActivityIndicator, Image,
+  View, ScrollView, TextInput, Pressable, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -9,8 +9,17 @@ import { useStore } from '../store';
 import { AppText, Card, PillButton, SectionHeader } from '../components';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '../theme';
 import { parseReceiptImage } from '../utils/geminiParser';
-import { calculateWoolworthsSplit, calculateRestaurantSplit } from '../utils/splitCalculator';
-import { WoolworthsSession, WoolworthsItem, RestaurantSession, RestaurantItem, HistoryEntry } from '../types';
+import {
+  calculateWoolworthsSplit,
+  calculateRestaurantSplit,
+  calculateUniversalSplit,
+} from '../utils/splitCalculator';
+import {
+  WoolworthsSession, WoolworthsItem,
+  RestaurantSession, RestaurantItem,
+  UniversalSession, UniversalItem,
+  HistoryEntry,
+} from '../types';
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -21,8 +30,10 @@ type BillItem = {
   name: string;
   price: string;
   productDiscount: string;
-  assignedTo: string[]; // [] = me only
+  assignedTo: string[]; // [] = me only; ['me', ...friendIds] = explicit
 };
+
+type BillType = 'woolworths' | 'restaurant' | 'universal';
 
 export default function BillEntryScreen() {
   const navigation = useNavigation<any>();
@@ -30,11 +41,20 @@ export default function BillEntryScreen() {
   const { friends, addHistory, geminiKey } = useStore();
 
   const participants: string[] = route.params?.participants ?? [];
-  const billType: 'woolworths' | 'restaurant' = route.params?.billType ?? 'woolworths';
-  const isWoolworths = billType === 'woolworths';
-  const accent = isWoolworths ? Colors.info : Colors.orange;
+  const billType: BillType = route.params?.billType ?? 'universal';
 
-  // All people in this split (me + selected friends)
+  const isWoolworths = billType === 'woolworths';
+  const isRestaurant = billType === 'restaurant';
+  const isUniversal = billType === 'universal';
+
+  const accent =
+    isWoolworths ? Colors.info :
+    isRestaurant ? Colors.orange :
+    Colors.primary;
+
+  const headerIcon = isWoolworths ? '🛒' : isRestaurant ? '🍽️' : '🧠';
+  const headerLabel = isWoolworths ? 'Woolworths' : isRestaurant ? 'Restaurant' : 'Smart Split';
+
   const allPeople = [
     { id: 'me', name: 'You', color: Colors.primary },
     ...friends.filter(f => participants.includes(f.id)),
@@ -42,17 +62,12 @@ export default function BillEntryScreen() {
 
   const friendMap = Object.fromEntries(friends.map(f => [f.id, f.name]));
 
-  // Items
   const [items, setItems] = useState<BillItem[]>([]);
-
-  // Discounts / fees
+  const [sessionLabel, setSessionLabel] = useState('');
   const [storeDiscount, setStoreDiscount] = useState<0 | 5 | 10>(0);
   const [voucher, setVoucher] = useState('0');
   const [extraFees, setExtraFees] = useState('0');
-
-  // Scanning state
   const [scanning, setScanning] = useState(false);
-  const [scannedImageUri, setScannedImageUri] = useState<string | null>(null);
 
   // ── Item helpers ─────────────────────────────────────────────────────────
 
@@ -70,28 +85,40 @@ export default function BillEntryScreen() {
     }]);
   };
 
+  // Fix: when adding a friend to a "me-only" item (assignedTo=[]),
+  // convert to ['me', friendId] so "You" stays highlighted
   const toggleAssignee = (itemId: string, personId: string) => {
     setItems(prev => prev.map(item => {
       if (item.id !== itemId) return item;
-      const already = item.assignedTo.includes(personId);
-      // 'me' is represented by [] so toggle accordingly
+
       if (personId === 'me') {
-        // If me is selected (assignedTo=[]), deselect: add others; if deselected add me back
-        // Simpler: if 'me' toggled while assignedTo includes me-equivalent...
-        // We store 'me' explicitly for multi-person selections
-        return {
-          ...item,
-          assignedTo: already
-            ? item.assignedTo.filter(x => x !== 'me')
-            : [...item.assignedTo, 'me'],
-        };
+        const isMeOnly = item.assignedTo.length === 0;
+        const hasMeExplicit = item.assignedTo.includes('me');
+        if (isMeOnly) {
+          // me was implicit (default) — explicitly deselect
+          const otherIds = allPeople.filter(p => p.id !== 'me').map(p => p.id);
+          return { ...item, assignedTo: otherIds.length > 0 ? otherIds : ['__none__'] };
+        }
+        if (hasMeExplicit) {
+          // remove me from explicit list
+          const rest = item.assignedTo.filter(x => x !== 'me');
+          return { ...item, assignedTo: rest.length > 0 ? rest : ['__none__'] };
+        }
+        // me not in list, add me back
+        const rest = item.assignedTo.filter(x => x !== '__none__');
+        return { ...item, assignedTo: [...rest, 'me'] };
       }
-      return {
-        ...item,
-        assignedTo: already
-          ? item.assignedTo.filter(x => x !== personId)
-          : [...item.assignedTo, personId],
-      };
+
+      // Toggling a friend
+      const already = item.assignedTo.includes(personId);
+      if (already) {
+        const rest = item.assignedTo.filter(x => x !== personId);
+        return { ...item, assignedTo: rest.length > 0 ? rest : [] };
+      } else {
+        // Adding friend: if was "me only" (assignedTo=[]), preserve me explicitly
+        const base = item.assignedTo.length === 0 ? ['me'] : item.assignedTo.filter(x => x !== '__none__');
+        return { ...item, assignedTo: [...base, personId] };
+      }
     }));
   };
 
@@ -103,13 +130,33 @@ export default function BillEntryScreen() {
     ));
   };
 
+  // ── Live running totals ──────────────────────────────────────────────────
+
+  const runningTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    allPeople.forEach(p => (totals[p.id] = 0));
+    items.forEach(item => {
+      const price = parseFloat(item.price) || 0;
+      if (price === 0) return;
+      const assignees = item.assignedTo.length === 0
+        ? ['me']
+        : item.assignedTo.filter(x => x !== '__none__');
+      if (assignees.length === 0) return;
+      const share = price / assignees.length;
+      assignees.forEach(id => {
+        if (totals[id] !== undefined) totals[id] += share;
+      });
+    });
+    return totals;
+  }, [items]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Scan receipt ─────────────────────────────────────────────────────────
 
   const handleScan = async () => {
     if (!geminiKey) {
       Alert.alert(
         'API Key Required',
-        'Add your Gemini API key in Settings → AI Key before scanning.',
+        'Add your OpenAI API key in Settings before scanning.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Go to Settings', onPress: () => navigation.navigate('Settings') },
@@ -127,14 +174,12 @@ export default function BillEntryScreen() {
     if (result.canceled || !result.assets[0].base64) return;
 
     const asset = result.assets[0];
-    setScannedImageUri(asset.uri);
     setScanning(true);
 
     try {
       const mimeType = asset.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
       const parsed = await parseReceiptImage(asset.base64!, mimeType, geminiKey);
 
-      // Populate items
       const newItems: BillItem[] = parsed.items.map(i => ({
         id: genId(),
         name: i.name,
@@ -145,15 +190,12 @@ export default function BillEntryScreen() {
 
       setItems(prev => [...prev, ...newItems]);
 
-      // Auto-fill discount fields from parsed receipt
-      if (isWoolworths) {
-        if (parsed.storeDiscount === 5 || parsed.storeDiscount === 10) {
-          setStoreDiscount(parsed.storeDiscount);
-        }
-        if (parsed.voucher > 0) setVoucher(String(parsed.voucher));
-      } else {
-        if (parsed.extraFees > 0) setExtraFees(String(parsed.extraFees));
+      // Auto-fill discount/fee fields from parsed receipt
+      if (parsed.storeDiscount === 5 || parsed.storeDiscount === 10) {
+        setStoreDiscount(parsed.storeDiscount);
       }
+      if (parsed.voucher > 0) setVoucher(String(parsed.voucher));
+      if (parsed.extraFees > 0) setExtraFees(String(parsed.extraFees));
 
       Alert.alert(
         '✅ Scanned!',
@@ -168,12 +210,23 @@ export default function BillEntryScreen() {
 
   // ── Calculate ────────────────────────────────────────────────────────────
 
+  const resolveAssignees = (item: BillItem): string[] => {
+    if (item.assignedTo.length === 0) return []; // implicit me only
+    if (item.assignedTo.includes('__none__')) return []; // treat as me only
+    if (item.assignedTo.length === 1 && item.assignedTo[0] === 'me') return []; // explicit me only
+    const withoutMe = item.assignedTo.filter(x => x !== 'me');
+    const includesMe = item.assignedTo.includes('me');
+    return includesMe ? ['me', ...withoutMe] : withoutMe;
+  };
+
   const handleCalculate = () => {
     if (items.length === 0) {
       Alert.alert('No items', 'Add at least one item.');
       return;
     }
-    const invalid = items.find(i => !i.name.trim() || isNaN(parseFloat(i.price)) || parseFloat(i.price) <= 0);
+    const invalid = items.find(
+      i => !i.name.trim() || isNaN(parseFloat(i.price)) || parseFloat(i.price) <= 0,
+    );
     if (invalid) {
       Alert.alert('Invalid item', `"${invalid.name || 'Unnamed'}" has a missing or invalid price.`);
       return;
@@ -181,32 +234,19 @@ export default function BillEntryScreen() {
 
     const sessionId = genId();
     const date = new Date().toISOString();
-    const label = isWoolworths
-      ? `Woolworths · ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`
-      : `Restaurant · ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`;
-
-    // Convert BillItem → session items
-    // assignedTo=[] means "me only"; if 'me' is in assignedTo alongside others, keep it
-    const resolveAssignees = (item: BillItem): string[] => {
-      if (item.assignedTo.length === 0) return []; // me only
-      // If only 'me' selected
-      if (item.assignedTo.length === 1 && item.assignedTo[0] === 'me') return [];
-      // Remove 'me' string and replace with proper empty-means-me logic:
-      // splitCalculator uses [] for me, friend ids for others
-      // For shared with me + friends, we pass friend ids + handle 'me' differently
-      const withoutMe = item.assignedTo.filter(x => x !== 'me');
-      const includesMe = item.assignedTo.includes('me');
-      if (includesMe && withoutMe.length === 0) return [];
-      if (includesMe) return ['me', ...withoutMe]; // pass 'me' explicitly for multi
-      return withoutMe;
-    };
+    const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+    const defaultLabel = isWoolworths
+      ? `Woolworths · ${dateStr}`
+      : isRestaurant
+        ? `Restaurant · ${dateStr}`
+        : `Smart Split · ${dateStr}`;
+    const label = sessionLabel.trim() || defaultLabel;
 
     let result;
 
     if (isWoolworths) {
       const woolItems: WoolworthsItem[] = items.map(i => ({
-        id: i.id,
-        name: i.name,
+        id: i.id, name: i.name,
         originalPrice: parseFloat(i.price),
         productDiscount: parseFloat(i.productDiscount) || 0,
         assignedTo: resolveAssignees(i),
@@ -217,10 +257,9 @@ export default function BillEntryScreen() {
         items: woolItems,
       };
       result = calculateWoolworthsSplit(session, friendMap);
-    } else {
+    } else if (isRestaurant) {
       const restItems: RestaurantItem[] = items.map(i => ({
-        id: i.id,
-        name: i.name,
+        id: i.id, name: i.name,
         price: parseFloat(i.price),
         assignedTo: resolveAssignees(i),
       }));
@@ -230,6 +269,22 @@ export default function BillEntryScreen() {
         extraFees: parseFloat(extraFees) || 0,
       };
       result = calculateRestaurantSplit(session, friendMap);
+    } else {
+      // Universal
+      const uItems: UniversalItem[] = items.map(i => ({
+        id: i.id, name: i.name,
+        originalPrice: parseFloat(i.price),
+        productDiscount: parseFloat(i.productDiscount) || 0,
+        assignedTo: resolveAssignees(i),
+      }));
+      const session: UniversalSession = {
+        id: sessionId, date, label,
+        storeDiscount,
+        voucher: parseFloat(voucher) || 0,
+        extraFees: parseFloat(extraFees) || 0,
+        items: uItems,
+      };
+      result = calculateUniversalSplit(session, friendMap);
     }
 
     const historyEntry: HistoryEntry = {
@@ -245,12 +300,10 @@ export default function BillEntryScreen() {
 
   // ── Render helpers ───────────────────────────────────────────────────────
 
-  const PersonChip = ({ person, selected, onPress }: {
-    person: { id: string; name: string; color: string };
-    selected: boolean;
-    onPress: () => void;
-  }) => {
-    const initials = person.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  const PersonChip = ({
+    person, selected, onPress,
+  }: { person: { id: string; name: string; color: string }; selected: boolean; onPress: () => void }) => {
+    const initials = person.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
     return (
       <Pressable
         onPress={onPress}
@@ -267,7 +320,10 @@ export default function BillEntryScreen() {
           backgroundColor: selected ? person.color : Colors.surface,
           alignItems: 'center', justifyContent: 'center',
         }}>
-          <AppText style={{ color: selected ? '#fff' : Colors.textMuted, fontSize: 9, fontWeight: FontWeight.bold }}>
+          <AppText style={{
+            color: selected ? '#fff' : Colors.textMuted,
+            fontSize: 9, fontWeight: FontWeight.bold,
+          }}>
             {initials}
           </AppText>
         </View>
@@ -275,10 +331,22 @@ export default function BillEntryScreen() {
           fontSize: FontSize.xs,
           color: selected ? person.color : Colors.textMuted,
           fontWeight: selected ? FontWeight.semibold : FontWeight.regular,
-        }}>{person.id === 'me' ? 'You' : person.name}</AppText>
+        }}>
+          {person.id === 'me' ? 'You' : person.name}
+        </AppText>
       </Pressable>
     );
   };
+
+  const showStoreDiscount = isWoolworths || isUniversal;
+  const showVoucher = isWoolworths || isUniversal;
+  const showExtraFees = isRestaurant || isUniversal;
+  const showProductDiscount = isWoolworths || isUniversal;
+
+  const hasFinancialFields =
+    (parseFloat(voucher) || 0) > 0 ||
+    (parseFloat(extraFees) || 0) > 0 ||
+    storeDiscount > 0;
 
   // ── UI ───────────────────────────────────────────────────────────────────
 
@@ -289,11 +357,12 @@ export default function BillEntryScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
-        <View style={{ paddingTop: Spacing.sm, gap: 4 }}>
+        <View style={{ paddingTop: Spacing.sm, gap: Spacing.sm }}>
           <AppText variant="h2" style={{ color: accent }}>
-            {isWoolworths ? '🛒 Woolworths' : '🍽️ Restaurant'}
+            {headerIcon} {headerLabel}
           </AppText>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: 4 }}>
+          {/* Participants row */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs }}>
             {allPeople.map(p => (
               <View key={p.id} style={{
                 paddingHorizontal: Spacing.sm, paddingVertical: 2,
@@ -305,6 +374,22 @@ export default function BillEntryScreen() {
               </View>
             ))}
           </View>
+          {/* Editable session label */}
+          <TextInput
+            value={sessionLabel}
+            onChangeText={setSessionLabel}
+            placeholder={
+              isWoolworths ? 'e.g. Woolworths weekly shop…'
+              : isRestaurant ? 'e.g. Dinner at Nando\'s…'
+              : 'e.g. DoorDash Friday night…'
+            }
+            placeholderTextColor={Colors.textMuted}
+            style={{
+              color: Colors.textPrimary, fontSize: FontSize.sm,
+              borderBottomWidth: 1, borderBottomColor: Colors.border,
+              paddingBottom: 4, paddingTop: 2,
+            }}
+          />
         </View>
 
         {/* Scan button */}
@@ -315,20 +400,24 @@ export default function BillEntryScreen() {
             flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
             gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg,
             borderWidth: 1.5, borderColor: accent, borderStyle: 'dashed',
-            backgroundColor: pressed ? accent + '15' : 'transparent',
+            backgroundColor: pressed ? accent + '15' : accent + '08',
             opacity: scanning ? 0.7 : 1,
           })}
         >
           {scanning
             ? <ActivityIndicator color={accent} />
-            : <AppText style={{ fontSize: 20 }}>📷</AppText>
+            : <AppText style={{ fontSize: 22 }}>📷</AppText>
           }
-          <AppText style={{ color: accent, fontWeight: FontWeight.semibold, fontSize: FontSize.md }}>
-            {scanning ? 'Scanning receipt...' : 'Scan Receipt'}
-          </AppText>
-          {!scanning && (
-            <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>tap to upload photo</AppText>
-          )}
+          <View>
+            <AppText style={{ color: accent, fontWeight: FontWeight.semibold, fontSize: FontSize.md }}>
+              {scanning ? 'Scanning receipt...' : 'Scan Receipt with AI'}
+            </AppText>
+            {!scanning && (
+              <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>
+                Auto-detects items, discounts & fees
+              </AppText>
+            )}
+          </View>
         </Pressable>
 
         {/* Items */}
@@ -380,10 +469,10 @@ export default function BillEntryScreen() {
                 </Pressable>
               </View>
 
-              {/* Product discount (Woolworths only) */}
-              {isWoolworths && (
+              {/* Product discount (Woolworths / Universal) */}
+              {showProductDiscount && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                  <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>Product discount:</AppText>
+                  <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>Item discount:</AppText>
                   <TextInput
                     value={item.productDiscount}
                     onChangeText={v => updateItem(item.id, { productDiscount: v })}
@@ -396,7 +485,7 @@ export default function BillEntryScreen() {
                       borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
                     }}
                   />
-                  <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>%</AppText>
+                  <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>% off</AppText>
                 </View>
               )}
 
@@ -421,19 +510,7 @@ export default function BillEntryScreen() {
                         key={p.id}
                         person={p}
                         selected={selected}
-                        onPress={() => {
-                          if (isMe) {
-                            // Toggle me: if currently only-me (assignedTo=[]), deselect = add 'me' as explicit false
-                            if (item.assignedTo.length === 0) {
-                              // me was implicit — now explicitly deselect
-                              updateItem(item.id, { assignedTo: ['__none__'] });
-                            } else {
-                              toggleAssignee(item.id, 'me');
-                            }
-                          } else {
-                            toggleAssignee(item.id, p.id);
-                          }
-                        }}
+                        onPress={() => toggleAssignee(item.id, p.id)}
                       />
                     );
                   })}
@@ -446,63 +523,99 @@ export default function BillEntryScreen() {
           ))}
         </View>
 
-        {/* Discounts / fees */}
-        <Card>
-          <SectionHeader title={isWoolworths ? 'Discounts & Voucher' : 'Extra Fees'} />
-          <View style={{ gap: Spacing.md }}>
-            {isWoolworths && (
-              <>
-                <View>
-                  <AppText variant="label" style={{ marginBottom: Spacing.sm }}>Store Discount</AppText>
-                  <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-                    {([0, 5, 10] as const).map(d => (
-                      <Pressable
-                        key={d}
-                        onPress={() => setStoreDiscount(d)}
-                        style={{
-                          flex: 1, paddingVertical: Spacing.sm,
-                          borderRadius: Radius.md, borderWidth: 1.5,
-                          borderColor: storeDiscount === d ? Colors.info : Colors.border,
-                          backgroundColor: storeDiscount === d ? Colors.info + '22' : 'transparent',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <AppText style={{
-                          color: storeDiscount === d ? Colors.info : Colors.textSecondary,
-                          fontWeight: FontWeight.semibold, fontSize: FontSize.sm,
-                        }}>
-                          {d === 0 ? 'None' : `${d}% off`}
-                        </AppText>
-                      </Pressable>
-                    ))}
+        {/* Live running totals */}
+        {items.length > 0 && (
+          <Card style={{ backgroundColor: Colors.surface }}>
+            <AppText style={{
+              color: Colors.textMuted, fontSize: FontSize.xs,
+              fontWeight: FontWeight.semibold, letterSpacing: 0.8,
+              marginBottom: Spacing.sm, textTransform: 'uppercase',
+            }}>
+              Live Preview (items only)
+            </AppText>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md }}>
+              {allPeople.map(p => (
+                <View key={p.id} style={{ alignItems: 'center', gap: 2, minWidth: 60 }}>
+                  <View style={{
+                    width: 32, height: 32, borderRadius: 16,
+                    backgroundColor: p.color + '33', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <AppText style={{ color: p.color, fontSize: FontSize.xs, fontWeight: FontWeight.bold }}>
+                      {p.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)}
+                    </AppText>
                   </View>
-                </View>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                  <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
-                    Voucher / Reward
+                  <AppText style={{ color: Colors.textSecondary, fontSize: 10 }}>
+                    {p.id === 'me' ? 'You' : p.name.split(' ')[0]}
                   </AppText>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <AppText style={{ color: Colors.textMuted }}>$</AppText>
-                    <TextInput
-                      value={voucher}
-                      onChangeText={setVoucher}
-                      keyboardType="decimal-pad"
-                      style={{
-                        color: Colors.success, fontSize: FontSize.md, fontWeight: FontWeight.semibold,
-                        minWidth: 60, textAlign: 'right',
-                        borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
-                      }}
-                    />
-                  </View>
+                  <AppText style={{
+                    color: Colors.textPrimary, fontWeight: FontWeight.bold, fontSize: FontSize.md,
+                  }}>
+                    ${(runningTotals[p.id] ?? 0).toFixed(2)}
+                  </AppText>
                 </View>
-              </>
+              ))}
+            </View>
+          </Card>
+        )}
+
+        {/* Discounts & Fees */}
+        <Card>
+          <SectionHeader title="Discounts & Fees" />
+          <View style={{ gap: Spacing.md }}>
+
+            {showStoreDiscount && (
+              <View>
+                <AppText variant="label" style={{ marginBottom: Spacing.sm }}>Store Discount</AppText>
+                <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+                  {([0, 5, 10] as const).map(d => (
+                    <Pressable
+                      key={d}
+                      onPress={() => setStoreDiscount(d)}
+                      style={{
+                        flex: 1, paddingVertical: Spacing.sm,
+                        borderRadius: Radius.md, borderWidth: 1.5,
+                        borderColor: storeDiscount === d ? Colors.info : Colors.border,
+                        backgroundColor: storeDiscount === d ? Colors.info + '22' : 'transparent',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <AppText style={{
+                        color: storeDiscount === d ? Colors.info : Colors.textSecondary,
+                        fontWeight: FontWeight.semibold, fontSize: FontSize.sm,
+                      }}>
+                        {d === 0 ? 'None' : `${d}% off`}
+                      </AppText>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
             )}
 
-            {!isWoolworths && (
+            {showVoucher && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
                 <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
-                  Delivery / Service / Tax
+                  Voucher / Reward
+                </AppText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <AppText style={{ color: Colors.textMuted }}>$</AppText>
+                  <TextInput
+                    value={voucher}
+                    onChangeText={setVoucher}
+                    keyboardType="decimal-pad"
+                    style={{
+                      color: Colors.success, fontSize: FontSize.md, fontWeight: FontWeight.semibold,
+                      minWidth: 60, textAlign: 'right',
+                      borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
+                    }}
+                  />
+                </View>
+              </View>
+            )}
+
+            {showExtraFees && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
+                  Delivery / Service / Tax / Surcharge
                 </AppText>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <AppText style={{ color: Colors.textMuted }}>$</AppText>
@@ -518,6 +631,12 @@ export default function BillEntryScreen() {
                   />
                 </View>
               </View>
+            )}
+
+            {!hasFinancialFields && (
+              <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs, fontStyle: 'italic' }}>
+                No extra discounts or fees — all zero
+              </AppText>
             )}
           </View>
         </Card>
@@ -542,13 +661,13 @@ function resolveLabel(
   const { assignedTo } = item;
   if (assignedTo.includes('__none__')) return 'No one assigned yet';
   if (assignedTo.length === 0) return 'You only';
-  if (assignedTo.length === allPeople.length ||
-    (assignedTo.includes('me') && assignedTo.filter(x => x !== 'me').length === allPeople.length - 1)) {
-    return 'Everyone splits equally';
-  }
-  const names = assignedTo.map(id => {
-    if (id === 'me') return 'You';
-    return allPeople.find(p => p.id === id)?.name ?? id;
-  });
+  const relevant = assignedTo.filter(x => x !== '__none__');
+  if (
+    relevant.length === allPeople.length ||
+    (relevant.includes('me') && relevant.filter(x => x !== 'me').length === allPeople.length - 1)
+  ) return 'Everyone splits equally';
+  const names = relevant.map(id =>
+    id === 'me' ? 'You' : allPeople.find(p => p.id === id)?.name ?? id,
+  );
   return names.join(' + ');
 }

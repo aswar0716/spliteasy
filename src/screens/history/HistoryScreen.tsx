@@ -14,8 +14,7 @@ function HistoryCard({ entry, onPress, onDelete }: {
   onPress: () => void;
   onDelete: () => void;
 }) {
-  const isWoolworths = entry.type === 'woolworths';
-  const accent = isWoolworths ? Colors.info : Colors.orange;
+  const accent = Colors.primary;
   const date = new Date(entry.date).toLocaleDateString('en-AU', {
     day: 'numeric', month: 'short', year: 'numeric',
   });
@@ -34,7 +33,7 @@ function HistoryCard({ entry, onPress, onDelete }: {
                 paddingVertical: 2,
               }}>
                 <AppText style={{ color: accent, fontSize: FontSize.xs, fontWeight: FontWeight.semibold }}>
-                  {isWoolworths ? '🛒 Woolworths' : '🍽️ Restaurant'}
+                  💸 Split
                 </AppText>
               </View>
             </View>

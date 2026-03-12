@@ -4,8 +4,7 @@ export type ParsedReceipt = {
   items: ParsedItem[];
   storeDiscount: number;  // % (e.g. 5 or 10)
   voucher: number;        // flat $ off
-  extraFees: number;      // delivery/service/tax $
-  type: 'woolworths' | 'restaurant' | 'universal';
+  extraFees: number;      // net delivery/service/tax $ (after any fee discounts/credits)
 };
 
 export type ParsedItem = {
@@ -21,19 +20,17 @@ const PROMPT = `You are a receipt parser. Analyse this receipt image and return 
   ],
   "storeDiscount": number,
   "voucher": number,
-  "extraFees": number,
-  "type": "woolworths" | "restaurant" | "universal"
+  "extraFees": number
 }
 
 Rules:
-- "price" = the original/shelf price before any discount
+- "items" = only actual purchased products/food items, never fees or totals
+- "price" = the original/shelf price before any per-item discount
 - "productDiscount" = % discount on that specific item (0 if none)
-- "storeDiscount" = overall store/member discount % (0 if none); for Woolworths Everyday Rewards use 5 or 10
-- "voucher" = any flat dollar voucher, reward, or promo code deducted (0 if none)
-- "extraFees" = delivery fee + service fee + surcharge + tax shown separately (0 if none)
-- "type" = "woolworths" for Woolworths/Coles/supermarkets, "restaurant" for restaurants/cafes/takeaway with no discounts, "universal" for anything else or if multiple discount types are present
-- Only include actual purchased items, not totals/subtotals/fees as items
-- Always extract ALL financial elements even if type is simple
+- "storeDiscount" = overall store/member discount % applied to all items (0 if none); Woolworths Everyday Rewards = 5 or 10
+- "voucher" = any flat dollar voucher, reward, or promo code deducted from the total (0 if none)
+- "extraFees" = NET sum of ALL fee lines: add delivery fee + service fee + surcharge + tax, then SUBTRACT any fee discounts or credits (e.g. if delivery is $5.49 and there is a -$5.49 discounted delivery line, they net to $0). Result must be >= 0
+- Never include negative-priced items in the items array — if a line is a discount on a specific item, express it as productDiscount %; if it is a fee credit, include it in the extraFees netting
 - Return ONLY the JSON object, nothing else`;
 
 export async function parseReceiptImage(
@@ -83,7 +80,7 @@ export async function parseReceiptImage(
     const parsed = JSON.parse(cleaned) as ParsedReceipt;
     parsed.storeDiscount = Number(parsed.storeDiscount) || 0;
     parsed.voucher = Number(parsed.voucher) || 0;
-    parsed.extraFees = Number(parsed.extraFees) || 0;
+    parsed.extraFees = Math.max(0, Number(parsed.extraFees) || 0); // clamp: net fees can't be negative
     parsed.items = (parsed.items ?? []).map(item => ({
       name: String(item.name ?? 'Item'),
       price: Math.abs(Number(item.price) || 0),

@@ -9,17 +9,8 @@ import { useStore } from '../store';
 import { AppText, Card, PillButton, SectionHeader } from '../components';
 import { Colors, Spacing, Radius, FontSize, FontWeight } from '../theme';
 import { parseReceiptImage } from '../utils/geminiParser';
-import {
-  calculateWoolworthsSplit,
-  calculateRestaurantSplit,
-  calculateUniversalSplit,
-} from '../utils/splitCalculator';
-import {
-  WoolworthsSession, WoolworthsItem,
-  RestaurantSession, RestaurantItem,
-  UniversalSession, UniversalItem,
-  HistoryEntry,
-} from '../types';
+import { calculateUniversalSplit } from '../utils/splitCalculator';
+import { UniversalSession, UniversalItem, HistoryEntry } from '../types';
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -33,27 +24,12 @@ type BillItem = {
   assignedTo: string[]; // [] = me only; ['me', ...friendIds] = explicit
 };
 
-type BillType = 'woolworths' | 'restaurant' | 'universal';
-
 export default function BillEntryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { friends, addHistory, geminiKey } = useStore();
 
   const participants: string[] = route.params?.participants ?? [];
-  const billType: BillType = route.params?.billType ?? 'universal';
-
-  const isWoolworths = billType === 'woolworths';
-  const isRestaurant = billType === 'restaurant';
-  const isUniversal = billType === 'universal';
-
-  const accent =
-    isWoolworths ? Colors.info :
-    isRestaurant ? Colors.orange :
-    Colors.primary;
-
-  const headerIcon = isWoolworths ? '🛒' : isRestaurant ? '🍽️' : '🧠';
-  const headerLabel = isWoolworths ? 'Woolworths' : isRestaurant ? 'Restaurant' : 'Smart Split';
 
   const allPeople = [
     { id: 'me', name: 'You', color: Colors.primary },
@@ -85,7 +61,7 @@ export default function BillEntryScreen() {
     }]);
   };
 
-  // Fix: when adding a friend to a "me-only" item (assignedTo=[]),
+  // When adding a friend to a "me-only" item (assignedTo=[]),
   // convert to ['me', friendId] so "You" stays highlighted
   const toggleAssignee = (itemId: string, personId: string) => {
     setItems(prev => prev.map(item => {
@@ -95,21 +71,17 @@ export default function BillEntryScreen() {
         const isMeOnly = item.assignedTo.length === 0;
         const hasMeExplicit = item.assignedTo.includes('me');
         if (isMeOnly) {
-          // me was implicit (default) — explicitly deselect
           const otherIds = allPeople.filter(p => p.id !== 'me').map(p => p.id);
           return { ...item, assignedTo: otherIds.length > 0 ? otherIds : ['__none__'] };
         }
         if (hasMeExplicit) {
-          // remove me from explicit list
           const rest = item.assignedTo.filter(x => x !== 'me');
           return { ...item, assignedTo: rest.length > 0 ? rest : ['__none__'] };
         }
-        // me not in list, add me back
         const rest = item.assignedTo.filter(x => x !== '__none__');
         return { ...item, assignedTo: [...rest, 'me'] };
       }
 
-      // Toggling a friend
       const already = item.assignedTo.includes(personId);
       if (already) {
         const rest = item.assignedTo.filter(x => x !== personId);
@@ -148,7 +120,7 @@ export default function BillEntryScreen() {
       });
     });
     return totals;
-  }, [items]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Scan receipt ─────────────────────────────────────────────────────────
 
@@ -190,17 +162,11 @@ export default function BillEntryScreen() {
 
       setItems(prev => [...prev, ...newItems]);
 
-      // Auto-fill discount/fee fields from parsed receipt
-      if (parsed.storeDiscount === 5 || parsed.storeDiscount === 10) {
-        setStoreDiscount(parsed.storeDiscount);
-      }
+      if (parsed.storeDiscount === 5 || parsed.storeDiscount === 10) setStoreDiscount(parsed.storeDiscount);
       if (parsed.voucher > 0) setVoucher(String(parsed.voucher));
       if (parsed.extraFees > 0) setExtraFees(String(parsed.extraFees));
 
-      Alert.alert(
-        '✅ Scanned!',
-        `Found ${newItems.length} items. Review and assign who ordered what.`,
-      );
+      Alert.alert('✅ Scanned!', `Found ${newItems.length} items. Assign who ordered what.`);
     } catch (e: any) {
       Alert.alert('Scan failed', e.message ?? 'Try a clearer photo.');
     } finally {
@@ -211,19 +177,15 @@ export default function BillEntryScreen() {
   // ── Calculate ────────────────────────────────────────────────────────────
 
   const resolveAssignees = (item: BillItem): string[] => {
-    if (item.assignedTo.length === 0) return []; // implicit me only
-    if (item.assignedTo.includes('__none__')) return []; // treat as me only
-    if (item.assignedTo.length === 1 && item.assignedTo[0] === 'me') return []; // explicit me only
+    if (item.assignedTo.length === 0) return [];
+    if (item.assignedTo.includes('__none__')) return [];
+    if (item.assignedTo.length === 1 && item.assignedTo[0] === 'me') return [];
     const withoutMe = item.assignedTo.filter(x => x !== 'me');
-    const includesMe = item.assignedTo.includes('me');
-    return includesMe ? ['me', ...withoutMe] : withoutMe;
+    return item.assignedTo.includes('me') ? ['me', ...withoutMe] : withoutMe;
   };
 
   const handleCalculate = () => {
-    if (items.length === 0) {
-      Alert.alert('No items', 'Add at least one item.');
-      return;
-    }
+    if (items.length === 0) { Alert.alert('No items', 'Add at least one item.'); return; }
     const invalid = items.find(
       i => !i.name.trim() || isNaN(parseFloat(i.price)) || parseFloat(i.price) <= 0,
     );
@@ -235,61 +197,27 @@ export default function BillEntryScreen() {
     const sessionId = genId();
     const date = new Date().toISOString();
     const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-    const defaultLabel = isWoolworths
-      ? `Woolworths · ${dateStr}`
-      : isRestaurant
-        ? `Restaurant · ${dateStr}`
-        : `Smart Split · ${dateStr}`;
-    const label = sessionLabel.trim() || defaultLabel;
+    const label = sessionLabel.trim() || `Split · ${dateStr}`;
 
-    let result;
+    const uItems: UniversalItem[] = items.map(i => ({
+      id: i.id, name: i.name,
+      originalPrice: parseFloat(i.price),
+      productDiscount: parseFloat(i.productDiscount) || 0,
+      assignedTo: resolveAssignees(i),
+    }));
 
-    if (isWoolworths) {
-      const woolItems: WoolworthsItem[] = items.map(i => ({
-        id: i.id, name: i.name,
-        originalPrice: parseFloat(i.price),
-        productDiscount: parseFloat(i.productDiscount) || 0,
-        assignedTo: resolveAssignees(i),
-      }));
-      const session: WoolworthsSession = {
-        id: sessionId, date, storeDiscount,
-        voucher: parseFloat(voucher) || 0,
-        items: woolItems,
-      };
-      result = calculateWoolworthsSplit(session, friendMap);
-    } else if (isRestaurant) {
-      const restItems: RestaurantItem[] = items.map(i => ({
-        id: i.id, name: i.name,
-        price: parseFloat(i.price),
-        assignedTo: resolveAssignees(i),
-      }));
-      const session: RestaurantSession = {
-        id: sessionId, date, label,
-        items: restItems,
-        extraFees: parseFloat(extraFees) || 0,
-      };
-      result = calculateRestaurantSplit(session, friendMap);
-    } else {
-      // Universal
-      const uItems: UniversalItem[] = items.map(i => ({
-        id: i.id, name: i.name,
-        originalPrice: parseFloat(i.price),
-        productDiscount: parseFloat(i.productDiscount) || 0,
-        assignedTo: resolveAssignees(i),
-      }));
-      const session: UniversalSession = {
-        id: sessionId, date, label,
-        storeDiscount,
-        voucher: parseFloat(voucher) || 0,
-        extraFees: parseFloat(extraFees) || 0,
-        items: uItems,
-      };
-      result = calculateUniversalSplit(session, friendMap);
-    }
+    const session: UniversalSession = {
+      id: sessionId, date, label, storeDiscount,
+      voucher: parseFloat(voucher) || 0,
+      extraFees: parseFloat(extraFees) || 0,
+      items: uItems,
+    };
+
+    const result = calculateUniversalSplit(session, friendMap);
 
     const historyEntry: HistoryEntry = {
       id: sessionId, date, label,
-      type: billType,
+      type: 'universal',
       grandTotal: result.grandTotal,
       splits: result.splits,
     };
@@ -320,10 +248,7 @@ export default function BillEntryScreen() {
           backgroundColor: selected ? person.color : Colors.surface,
           alignItems: 'center', justifyContent: 'center',
         }}>
-          <AppText style={{
-            color: selected ? '#fff' : Colors.textMuted,
-            fontSize: 9, fontWeight: FontWeight.bold,
-          }}>
+          <AppText style={{ color: selected ? '#fff' : Colors.textMuted, fontSize: 9, fontWeight: FontWeight.bold }}>
             {initials}
           </AppText>
         </View>
@@ -338,16 +263,6 @@ export default function BillEntryScreen() {
     );
   };
 
-  const showStoreDiscount = isWoolworths || isUniversal;
-  const showVoucher = isWoolworths || isUniversal;
-  const showExtraFees = isRestaurant || isUniversal;
-  const showProductDiscount = isWoolworths || isUniversal;
-
-  const hasFinancialFields =
-    (parseFloat(voucher) || 0) > 0 ||
-    (parseFloat(extraFees) || 0) > 0 ||
-    storeDiscount > 0;
-
   // ── UI ───────────────────────────────────────────────────────────────────
 
   return (
@@ -358,10 +273,8 @@ export default function BillEntryScreen() {
       >
         {/* Header */}
         <View style={{ paddingTop: Spacing.sm, gap: Spacing.sm }}>
-          <AppText variant="h2" style={{ color: accent }}>
-            {headerIcon} {headerLabel}
-          </AppText>
-          {/* Participants row */}
+          <AppText variant="h2">Bill Entry</AppText>
+          {/* Participants */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs }}>
             {allPeople.map(p => (
               <View key={p.id} style={{
@@ -374,15 +287,11 @@ export default function BillEntryScreen() {
               </View>
             ))}
           </View>
-          {/* Editable session label */}
+          {/* Editable label */}
           <TextInput
             value={sessionLabel}
             onChangeText={setSessionLabel}
-            placeholder={
-              isWoolworths ? 'e.g. Woolworths weekly shop…'
-              : isRestaurant ? 'e.g. Dinner at Nando\'s…'
-              : 'e.g. DoorDash Friday night…'
-            }
+            placeholder="Name this split (e.g. DoorDash Friday night…)"
             placeholderTextColor={Colors.textMuted}
             style={{
               color: Colors.textPrimary, fontSize: FontSize.sm,
@@ -399,17 +308,14 @@ export default function BillEntryScreen() {
           style={({ pressed }) => ({
             flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
             gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg,
-            borderWidth: 1.5, borderColor: accent, borderStyle: 'dashed',
-            backgroundColor: pressed ? accent + '15' : accent + '08',
+            borderWidth: 1.5, borderColor: Colors.primary, borderStyle: 'dashed',
+            backgroundColor: pressed ? Colors.primary + '15' : Colors.primary + '08',
             opacity: scanning ? 0.7 : 1,
           })}
         >
-          {scanning
-            ? <ActivityIndicator color={accent} />
-            : <AppText style={{ fontSize: 22 }}>📷</AppText>
-          }
+          {scanning ? <ActivityIndicator color={Colors.primary} /> : <AppText style={{ fontSize: 22 }}>📷</AppText>}
           <View>
-            <AppText style={{ color: accent, fontWeight: FontWeight.semibold, fontSize: FontSize.md }}>
+            <AppText style={{ color: Colors.primary, fontWeight: FontWeight.semibold, fontSize: FontSize.md }}>
               {scanning ? 'Scanning receipt...' : 'Scan Receipt with AI'}
             </AppText>
             {!scanning && (
@@ -424,11 +330,8 @@ export default function BillEntryScreen() {
         <View style={{ gap: Spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <SectionHeader title={`${items.length} item${items.length !== 1 ? 's' : ''}`} />
-            <Pressable
-              onPress={addBlankItem}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 }}
-            >
-              <AppText style={{ color: accent, fontSize: FontSize.sm, fontWeight: FontWeight.semibold }}>
+            <Pressable onPress={addBlankItem} style={{ paddingVertical: 2 }}>
+              <AppText style={{ color: Colors.primary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold }}>
                 + Add manually
               </AppText>
             </Pressable>
@@ -436,7 +339,7 @@ export default function BillEntryScreen() {
 
           {items.map((item, index) => (
             <Card key={item.id} variant="alt" style={{ gap: Spacing.sm }}>
-              {/* Row 1: name + price + delete */}
+              {/* Name + price + delete */}
               <View style={{ flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' }}>
                 <TextInput
                   value={item.name}
@@ -469,32 +372,30 @@ export default function BillEntryScreen() {
                 </Pressable>
               </View>
 
-              {/* Product discount (Woolworths / Universal) */}
-              {showProductDiscount && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                  <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>Item discount:</AppText>
-                  <TextInput
-                    value={item.productDiscount}
-                    onChangeText={v => updateItem(item.id, { productDiscount: v })}
-                    placeholder="0"
-                    placeholderTextColor={Colors.textMuted}
-                    keyboardType="decimal-pad"
-                    style={{
-                      color: Colors.success, fontSize: FontSize.sm, fontWeight: FontWeight.semibold,
-                      minWidth: 32, textAlign: 'center',
-                      borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
-                    }}
-                  />
-                  <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>% off</AppText>
-                </View>
-              )}
+              {/* Item discount % */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>Item discount:</AppText>
+                <TextInput
+                  value={item.productDiscount}
+                  onChangeText={v => updateItem(item.id, { productDiscount: v })}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="decimal-pad"
+                  style={{
+                    color: Colors.success, fontSize: FontSize.sm, fontWeight: FontWeight.semibold,
+                    minWidth: 32, textAlign: 'center',
+                    borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
+                  }}
+                />
+                <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>% off</AppText>
+              </View>
 
               {/* Who's splitting this item */}
               <View style={{ gap: Spacing.xs }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>Who's splitting this?</AppText>
                   <Pressable onPress={() => assignAll(item.id)}>
-                    <AppText style={{ color: accent, fontSize: FontSize.xs, fontWeight: FontWeight.semibold }}>
+                    <AppText style={{ color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.semibold }}>
                       Everyone
                     </AppText>
                   </Pressable>
@@ -527,9 +428,8 @@ export default function BillEntryScreen() {
         {items.length > 0 && (
           <Card style={{ backgroundColor: Colors.surface }}>
             <AppText style={{
-              color: Colors.textMuted, fontSize: FontSize.xs,
-              fontWeight: FontWeight.semibold, letterSpacing: 0.8,
-              marginBottom: Spacing.sm, textTransform: 'uppercase',
+              color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: FontWeight.semibold,
+              letterSpacing: 0.8, marginBottom: Spacing.sm, textTransform: 'uppercase',
             }}>
               Live Preview (items only)
             </AppText>
@@ -547,9 +447,7 @@ export default function BillEntryScreen() {
                   <AppText style={{ color: Colors.textSecondary, fontSize: 10 }}>
                     {p.id === 'me' ? 'You' : p.name.split(' ')[0]}
                   </AppText>
-                  <AppText style={{
-                    color: Colors.textPrimary, fontWeight: FontWeight.bold, fontSize: FontSize.md,
-                  }}>
+                  <AppText style={{ color: Colors.textPrimary, fontWeight: FontWeight.bold, fontSize: FontSize.md }}>
                     ${(runningTotals[p.id] ?? 0).toFixed(2)}
                   </AppText>
                 </View>
@@ -563,81 +461,70 @@ export default function BillEntryScreen() {
           <SectionHeader title="Discounts & Fees" />
           <View style={{ gap: Spacing.md }}>
 
-            {showStoreDiscount && (
-              <View>
-                <AppText variant="label" style={{ marginBottom: Spacing.sm }}>Store Discount</AppText>
-                <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-                  {([0, 5, 10] as const).map(d => (
-                    <Pressable
-                      key={d}
-                      onPress={() => setStoreDiscount(d)}
-                      style={{
-                        flex: 1, paddingVertical: Spacing.sm,
-                        borderRadius: Radius.md, borderWidth: 1.5,
-                        borderColor: storeDiscount === d ? Colors.info : Colors.border,
-                        backgroundColor: storeDiscount === d ? Colors.info + '22' : 'transparent',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <AppText style={{
-                        color: storeDiscount === d ? Colors.info : Colors.textSecondary,
-                        fontWeight: FontWeight.semibold, fontSize: FontSize.sm,
-                      }}>
-                        {d === 0 ? 'None' : `${d}% off`}
-                      </AppText>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {showVoucher && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
-                  Voucher / Reward
-                </AppText>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <AppText style={{ color: Colors.textMuted }}>$</AppText>
-                  <TextInput
-                    value={voucher}
-                    onChangeText={setVoucher}
-                    keyboardType="decimal-pad"
+            <View>
+              <AppText variant="label" style={{ marginBottom: Spacing.sm }}>Store / Member Discount</AppText>
+              <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+                {([0, 5, 10] as const).map(d => (
+                  <Pressable
+                    key={d}
+                    onPress={() => setStoreDiscount(d)}
                     style={{
-                      color: Colors.success, fontSize: FontSize.md, fontWeight: FontWeight.semibold,
-                      minWidth: 60, textAlign: 'right',
-                      borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
+                      flex: 1, paddingVertical: Spacing.sm,
+                      borderRadius: Radius.md, borderWidth: 1.5,
+                      borderColor: storeDiscount === d ? Colors.info : Colors.border,
+                      backgroundColor: storeDiscount === d ? Colors.info + '22' : 'transparent',
+                      alignItems: 'center',
                     }}
-                  />
-                </View>
+                  >
+                    <AppText style={{
+                      color: storeDiscount === d ? Colors.info : Colors.textSecondary,
+                      fontWeight: FontWeight.semibold, fontSize: FontSize.sm,
+                    }}>
+                      {d === 0 ? 'None' : `${d}% off`}
+                    </AppText>
+                  </Pressable>
+                ))}
               </View>
-            )}
+            </View>
 
-            {showExtraFees && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-                <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
-                  Delivery / Service / Tax / Surcharge
-                </AppText>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <AppText style={{ color: Colors.textMuted }}>$</AppText>
-                  <TextInput
-                    value={extraFees}
-                    onChangeText={setExtraFees}
-                    keyboardType="decimal-pad"
-                    style={{
-                      color: Colors.warning, fontSize: FontSize.md, fontWeight: FontWeight.semibold,
-                      minWidth: 60, textAlign: 'right',
-                      borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
-                    }}
-                  />
-                </View>
-              </View>
-            )}
-
-            {!hasFinancialFields && (
-              <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs, fontStyle: 'italic' }}>
-                No extra discounts or fees — all zero
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+              <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
+                Voucher / Reward ($)
               </AppText>
-            )}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <AppText style={{ color: Colors.textMuted }}>$</AppText>
+                <TextInput
+                  value={voucher}
+                  onChangeText={setVoucher}
+                  keyboardType="decimal-pad"
+                  style={{
+                    color: Colors.success, fontSize: FontSize.md, fontWeight: FontWeight.semibold,
+                    minWidth: 60, textAlign: 'right',
+                    borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
+                  }}
+                />
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+              <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
+                Delivery / Service / Tax ($)
+              </AppText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <AppText style={{ color: Colors.textMuted }}>$</AppText>
+                <TextInput
+                  value={extraFees}
+                  onChangeText={setExtraFees}
+                  keyboardType="decimal-pad"
+                  style={{
+                    color: Colors.warning, fontSize: FontSize.md, fontWeight: FontWeight.semibold,
+                    minWidth: 60, textAlign: 'right',
+                    borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
+                  }}
+                />
+              </View>
+            </View>
+
           </View>
         </Card>
 
@@ -666,8 +553,5 @@ function resolveLabel(
     relevant.length === allPeople.length ||
     (relevant.includes('me') && relevant.filter(x => x !== 'me').length === allPeople.length - 1)
   ) return 'Everyone splits equally';
-  const names = relevant.map(id =>
-    id === 'me' ? 'You' : allPeople.find(p => p.id === id)?.name ?? id,
-  );
-  return names.join(' + ');
+  return relevant.map(id => id === 'me' ? 'You' : allPeople.find(p => p.id === id)?.name ?? id).join(' + ');
 }

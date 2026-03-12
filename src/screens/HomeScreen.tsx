@@ -92,8 +92,7 @@ export default function HomeScreen() {
             </View>
 
             {recentHistory.map(entry => {
-              const isWoolworths = entry.type === 'woolworths';
-              const accent = isWoolworths ? Colors.info : Colors.orange;
+              const accent = Colors.primary;
               const myShare = entry.splits.find(s => s.friendId === 'me');
 
               return (
@@ -111,7 +110,7 @@ export default function HomeScreen() {
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <View style={{ flex: 1, gap: 3 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
-                        <AppText style={{ fontSize: 14 }}>{isWoolworths ? '🛒' : '🍽️'}</AppText>
+                        <AppText style={{ fontSize: 14 }}>💸</AppText>
                         <AppText style={{ color: accent, fontWeight: FontWeight.semibold, fontSize: FontSize.sm }}>
                           {entry.label}
                         </AppText>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, ScrollView, Share } from 'react-native';
+import { View, ScrollView, Share, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { AppText, Card, PillButton, SectionHeader } from '../components';
@@ -94,22 +94,30 @@ export default function SummaryScreen() {
   const result: SplitResult = JSON.parse(route.params.result);
   const label: string = route.params.label;
 
-  const handleShareAll = async () => {
-    const lines = [
-      `📋 ${label}`,
-      ``,
-      ...result.splits.map(s => `${s.name}: ${fmt(s.total)}`),
-      ``,
-      `Total: ${fmt(result.grandTotal)}`,
-    ];
-    await Share.share({ message: lines.join('\n') });
+  const buildShareText = () => [
+    `💸 ${label}`,
+    ``,
+    ...result.splits.map(s => `${s.name === 'Me' ? 'You' : s.name}: ${fmt(s.total)}`),
+    ``,
+    `Total: ${fmt(result.grandTotal)}`,
+  ].join('\n');
+
+  const buildPersonText = (split: PersonSplit) =>
+    `💸 ${label}\n${split.name === 'Me' ? 'You' : split.name} owes: ${fmt(split.total)}`;
+
+  const shareViaWhatsApp = async (text: string) => {
+    const url = `whatsapp://send?text=${encodeURIComponent(text)}`;
+    const canOpen = await Linking.canOpenURL(url);
+    if (canOpen) {
+      await Linking.openURL(url);
+    } else {
+      await Share.share({ message: text });
+    }
   };
 
-  const handleSharePerson = async (split: PersonSplit) => {
-    await Share.share({
-      message: `📋 ${label}\n${split.name} owes: ${fmt(split.total)}`,
-    });
-  };
+  const handleShareAll = () => shareViaWhatsApp(buildShareText());
+
+  const handleSharePerson = (split: PersonSplit) => shareViaWhatsApp(buildPersonText(split));
 
   // Sort: me first
   const sorted = [...result.splits].sort((a, b) =>

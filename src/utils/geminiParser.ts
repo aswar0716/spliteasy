@@ -24,13 +24,13 @@ const PROMPT = `You are a receipt parser. Analyse this receipt image and return 
 }
 
 Rules:
-- "items" = only actual purchased products/food items, never fees or totals
-- "price" = the original/shelf price before any per-item discount
-- "productDiscount" = % discount on that specific item (0 if none)
-- "storeDiscount" = overall store/member discount % applied to all items (0 if none); Woolworths Everyday Rewards = 5 or 10
-- "voucher" = any flat dollar voucher, reward, or promo code deducted from the total (0 if none)
-- "extraFees" = NET sum of ALL fee lines: add delivery fee + service fee + surcharge + tax, then SUBTRACT any fee discounts or credits (e.g. if delivery is $5.49 and there is a -$5.49 discounted delivery line, they net to $0). Result must be >= 0
-- Never include negative-priced items in the items array — if a line is a discount on a specific item, express it as productDiscount %; if it is a fee credit, include it in the extraFees netting
+- "items" = only purchased products/food items — never fees, never totals, never subtotals
+- "price" = the original shelf price BEFORE any discount on that item
+- "productDiscount" = % off for that specific item (0 if none). IMPORTANT: if a negative line like "WW Product Discount -$X", "Member Savings -$X", "Promo -$X" immediately follows an item, it is a per-item discount — calculate productDiscount = (X / item_price) * 100 and apply it to that item. Do NOT include such lines separately.
+- "storeDiscount" = overall store/member discount % applied to all items simultaneously (0 if none). Woolworths Everyday Rewards = 5 or 10.
+- "voucher" = flat dollar voucher or reward code deducted at checkout (0 if none)
+- "extraFees" = NET extra fees ADDED ON TOP of the subtotal: delivery fee + service fee + surcharges. SUBTRACT any credits on those fees. Result must be >= 0.
+  CRITICAL: GST / tax shown as "including GST", "incl. GST", or "GST included in prices" is already inside the item prices — do NOT add it to extraFees. Only add tax that is a SEPARATE line added to the subtotal.
 - Return ONLY the JSON object, nothing else`;
 
 export async function parseReceiptImage(

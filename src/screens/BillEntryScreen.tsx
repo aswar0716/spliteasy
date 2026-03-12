@@ -163,8 +163,8 @@ export default function BillEntryScreen() {
       setItems(prev => [...prev, ...newItems]);
 
       if (parsed.storeDiscount === 5 || parsed.storeDiscount === 10) setStoreDiscount(parsed.storeDiscount);
-      if (parsed.voucher > 0) setVoucher(String(parsed.voucher));
-      if (parsed.extraFees > 0) setExtraFees(String(parsed.extraFees));
+      if (parsed.voucher > 0) setVoucher(prev => ((parseFloat(prev) || 0) + parsed.voucher).toFixed(2));
+      if (parsed.extraFees > 0) setExtraFees(prev => ((parseFloat(prev) || 0) + parsed.extraFees).toFixed(2));
 
       Alert.alert('✅ Scanned!', `Found ${newItems.length} items. Assign who ordered what.`);
     } catch (e: any) {

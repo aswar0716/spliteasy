@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, ScrollView, TextInput, Pressable, Alert, ActivityIndicator,
 } from 'react-native';
@@ -122,6 +122,20 @@ export default function BillEntryScreen() {
     return totals;
   }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Bill total preview ───────────────────────────────────────────────────
+
+  const billPreview = useMemo(() => {
+    const rawSubtotal = items.reduce((s, i) => s + (parseFloat(i.price) || 0), 0);
+    const itemDiscounts = items.reduce((s, i) => s + (parseFloat(i.productDiscount) || 0), 0);
+    const afterItemDisc = rawSubtotal - itemDiscounts;
+    const storeDiscAmt = afterItemDisc * (storeDiscount / 100);
+    const afterStoreDisc = afterItemDisc - storeDiscAmt;
+    const voucherAmt = parseFloat(voucher) || 0;
+    const feesAmt = parseFloat(extraFees) || 0;
+    const net = Math.max(0, afterStoreDisc - voucherAmt + feesAmt);
+    return { rawSubtotal, itemDiscounts, storeDiscAmt, voucherAmt, feesAmt, net };
+  }, [items, storeDiscount, voucher, extraFees]);
+
   // ── Scan receipt ─────────────────────────────────────────────────────────
 
   const checkApiKey = (): boolean => {
@@ -218,12 +232,18 @@ export default function BillEntryScreen() {
     const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
     const label = sessionLabel.trim() || `Split · ${dateStr}`;
 
-    const uItems: UniversalItem[] = items.map(i => ({
-      id: i.id, name: i.name,
-      originalPrice: parseFloat(i.price),
-      productDiscount: parseFloat(i.productDiscount) || 0,
-      assignedTo: resolveAssignees(i),
-    }));
+    const uItems: UniversalItem[] = items.map(i => {
+      const originalPrice = parseFloat(i.price) || 0;
+      const discountAmt = parseFloat(i.productDiscount) || 0;
+      // Calculator expects productDiscount as a %; convert from dollar amount
+      const productDiscountPct = originalPrice > 0 ? (discountAmt / originalPrice) * 100 : 0;
+      return {
+        id: i.id, name: i.name,
+        originalPrice,
+        productDiscount: productDiscountPct,
+        assignedTo: resolveAssignees(i),
+      };
+    });
 
     const session: UniversalSession = {
       id: sessionId, date, label, storeDiscount,
@@ -419,22 +439,31 @@ export default function BillEntryScreen() {
                 </Pressable>
               </View>
 
-              {/* Item discount % */}
+              {/* Item discount $ */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
                 <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>Item discount:</AppText>
+                <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>-$</AppText>
                 <TextInput
                   value={item.productDiscount}
                   onChangeText={v => updateItem(item.id, { productDiscount: v })}
-                  placeholder="0"
+                  placeholder="0.00"
                   placeholderTextColor={Colors.textMuted}
                   keyboardType="decimal-pad"
                   style={{
                     color: Colors.success, fontSize: FontSize.sm, fontWeight: FontWeight.semibold,
-                    minWidth: 32, textAlign: 'center',
+                    minWidth: 50, textAlign: 'center',
                     borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 2,
                   }}
                 />
-                <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>% off</AppText>
+                {(() => {
+                  const p = parseFloat(item.price) || 0;
+                  const d = parseFloat(item.productDiscount) || 0;
+                  if (p > 0 && d > 0) {
+                    const pct = ((d / p) * 100).toFixed(0);
+                    return <AppText style={{ color: Colors.success + 'AA', fontSize: FontSize.xs }}>({pct}% off)</AppText>;
+                  }
+                  return null;
+                })()}
               </View>
 
               {/* Who's splitting this item */}
@@ -508,8 +537,16 @@ export default function BillEntryScreen() {
           <SectionHeader title="Discounts & Fees" />
           <View style={{ gap: Spacing.md }}>
 
+            {/* Store discount % with live $ equivalent */}
             <View>
-              <AppText variant="label" style={{ marginBottom: Spacing.sm }}>Store / Member Discount</AppText>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm }}>
+                <AppText variant="label">Store / Member Discount</AppText>
+                {storeDiscount > 0 && billPreview.storeDiscAmt > 0 && (
+                  <AppText style={{ color: Colors.info, fontSize: FontSize.xs, fontWeight: FontWeight.semibold }}>
+                    = -${billPreview.storeDiscAmt.toFixed(2)} off
+                  </AppText>
+                )}
+              </View>
               <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
                 {([0, 5, 10] as const).map(d => (
                   <Pressable
@@ -534,12 +571,18 @@ export default function BillEntryScreen() {
               </View>
             </View>
 
+            {/* Discounts & Vouchers */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-              <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
-                Voucher / Reward ($)
-              </AppText>
+              <View style={{ flex: 1 }}>
+                <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm }}>
+                  Discounts & Vouchers
+                </AppText>
+                <AppText style={{ color: Colors.textMuted, fontSize: 10, marginTop: 2 }}>
+                  team/member/promo discounts + vouchers
+                </AppText>
+              </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <AppText style={{ color: Colors.textMuted }}>$</AppText>
+                <AppText style={{ color: Colors.textMuted }}>-$</AppText>
                 <TextInput
                   value={voucher}
                   onChangeText={setVoucher}
@@ -553,12 +596,18 @@ export default function BillEntryScreen() {
               </View>
             </View>
 
+            {/* Extra fees */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
-              <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm, flex: 1 }}>
-                Delivery / Service / Tax ($)
-              </AppText>
+              <View style={{ flex: 1 }}>
+                <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm }}>
+                  Delivery / Service / Tax
+                </AppText>
+                <AppText style={{ color: Colors.textMuted, fontSize: 10, marginTop: 2 }}>
+                  net fees added on top of subtotal
+                </AppText>
+              </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <AppText style={{ color: Colors.textMuted }}>$</AppText>
+                <AppText style={{ color: Colors.textMuted }}>+$</AppText>
                 <TextInput
                   value={extraFees}
                   onChangeText={setExtraFees}
@@ -575,6 +624,48 @@ export default function BillEntryScreen() {
           </View>
         </Card>
 
+        {/* Bill total verification card */}
+        {items.length > 0 && (
+          <Card style={{ backgroundColor: Colors.primary + '10', borderColor: Colors.primary + '40' }}>
+            <AppText style={{
+              color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: FontWeight.semibold,
+              letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: Spacing.sm,
+            }}>
+              Detected Bill Total
+            </AppText>
+            <View style={{ gap: 6 }}>
+              <BillRow label="Items subtotal" value={`$${billPreview.rawSubtotal.toFixed(2)}`} />
+              {billPreview.itemDiscounts > 0 && (
+                <BillRow label="Item discounts" value={`-$${billPreview.itemDiscounts.toFixed(2)}`} valueColor={Colors.success} />
+              )}
+              {storeDiscount > 0 && (
+                <BillRow
+                  label={`Store discount (${storeDiscount}%)`}
+                  value={`-$${billPreview.storeDiscAmt.toFixed(2)}`}
+                  valueColor={Colors.success}
+                />
+              )}
+              {billPreview.voucherAmt > 0 && (
+                <BillRow label="Discounts & vouchers" value={`-$${billPreview.voucherAmt.toFixed(2)}`} valueColor={Colors.success} />
+              )}
+              {billPreview.feesAmt > 0 && (
+                <BillRow label="Fees" value={`+$${billPreview.feesAmt.toFixed(2)}`} valueColor={Colors.warning} />
+              )}
+              <View style={{ borderTopWidth: 1, borderTopColor: Colors.border, marginTop: 4, paddingTop: 8, flexDirection: 'row', justifyContent: 'space-between' }}>
+                <AppText style={{ color: Colors.textPrimary, fontWeight: FontWeight.bold, fontSize: FontSize.md }}>
+                  Net Total
+                </AppText>
+                <AppText style={{ color: Colors.primary, fontWeight: FontWeight.extrabold, fontSize: FontSize.lg }}>
+                  ${billPreview.net.toFixed(2)}
+                </AppText>
+              </View>
+            </View>
+            <AppText style={{ color: Colors.textMuted, fontSize: 10, marginTop: Spacing.sm, fontStyle: 'italic' }}>
+              Compare this to your receipt total to verify accuracy
+            </AppText>
+          </Card>
+        )}
+
         <PillButton
           label="Calculate Split →"
           onPress={handleCalculate}
@@ -587,6 +678,17 @@ export default function BillEntryScreen() {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function BillRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <AppText style={{ color: Colors.textSecondary, fontSize: FontSize.sm }}>{label}</AppText>
+      <AppText style={{ color: valueColor ?? Colors.textPrimary, fontSize: FontSize.sm, fontWeight: FontWeight.semibold }}>
+        {value}
+      </AppText>
+    </View>
+  );
+}
 
 function resolveLabel(
   item: BillItem,

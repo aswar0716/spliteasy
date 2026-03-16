@@ -13,40 +13,41 @@ export type ParsedItem = {
   productDiscount: number; // % off (0 if none)
 };
 
-const PROMPT = `You are an expert receipt parser for a bill-splitting app. Read the ENTIRE receipt carefully before producing output. Return ONLY valid JSON — no markdown, no explanation, no extra text.
+const PROMPT = `You are an expert receipt parser for a bill-splitting app. Read the ENTIRE receipt top to bottom before producing output. Return ONLY valid JSON — no markdown, no explanation.
 
 Output format:
 {"items":[{"name":"string","price":number,"productDiscount":number}],"storeDiscount":number,"voucher":number,"extraFees":number}
 
 ═══ ITEMS ═══
-• Include ONLY purchased products/food/grocery lines
-• "price" = the original shelf/list price BEFORE any discount (always positive)
-• "productDiscount" = % discount on THIS specific item:
-  - Look for a negative line printed DIRECTLY BELOW the item it belongs to (same product block)
-  - These are labelled things like: "WW Discount", "WW Product Discount", "Half Price Save", "Member Price Save", "Promo Save", "Loyalty Save", "Discount -$X"
-  - Formula: productDiscount = round((discountAmount / originalPrice) × 100, 1)
-  - Example: "Eggs $6.50" then "WW Discount -$0.60" → price=6.50, productDiscount=9.2
-  - If no per-item discount exists, set productDiscount=0
-• NEVER include totals, subtotals, GST notes, fee lines, or discount summary lines as items
+• Include ONLY purchased product/food/grocery lines — NOT fees, totals, subtotals, or discount summary lines
+• "price" = the original shelf/list price BEFORE any discount (always a positive number)
+• "productDiscount" = the discount DOLLAR AMOUNT for THIS specific item (NOT a percentage):
+  - A negative line printed DIRECTLY BELOW or adjacent to the item in the same product block = that item's discount
+  - Labels: "WW Discount", "WW Product Discount", "Half Price Save", "Promo Save", "Member Price Save", "Loyalty Save"
+  - Example: "Eggs $6.50" then "WW Discount -$0.60" → price=6.50, productDiscount=0.60
+  - productDiscount is always POSITIVE (e.g. if receipt shows -$0.60, set 0.60)
+  - Set to 0 if no per-item discount for this product
 
-═══ STORE DISCOUNT (storeDiscount) ═══
-• A single % off applied to ALL items at once (e.g. Everyday Rewards 5% or 10%)
-• Usually labelled "5% off your shop", "Member Discount 10%", "Rewards Discount"
-• Set to 0 if not present
+═══ STORE DISCOUNT % (storeDiscount) ═══
+• ONLY for a PERCENTAGE discount applied to ALL items at once via membership
+• Labels: "Everyday Rewards 5%", "10% off your shop", "Member Discount 10%"
+• Set to 5 or 10 (Woolworths) or the relevant %, or 0 if none
+• Do NOT use this for dollar-amount discounts
 
-═══ VOUCHER (voucher) ═══
-• Flat $ amount taken off the bill total — appear in the TOTALS SECTION, not next to a specific item
-• Examples: "Voucher -$10", "Gift Card -$20", "$5 Everyday Rewards", "Promo Code -$3", "Discount -$X" in totals
-• Also include any general discount lines in the totals section that are NOT per-item
-• Sum all such deductions; always return a POSITIVE number (e.g. receipt shows -$5 → set 5)
+═══ DISCOUNTS & VOUCHERS (voucher) ═══
+This field captures ALL flat-dollar deductions that appear in the TOTALS section — both general discounts AND payment vouchers. Sum them all into one number.
+TWO TYPES that both go here:
+  1. DISCOUNTS (in the totals/savings section): "Team Discount -$X", "Additional Discount -$X", "Member Discount -$X", "Savings -$X", "Promotional Discount -$X"
+  2. VOUCHERS/PAYMENTS (in the payment section at the bottom): "Voucher -$X", "Gift Card -$X", "Reward Dollars -$X", "Promo Code -$X", "eVoucher -$X"
+• Sum ALL of the above into voucher; always return a POSITIVE number
 • Set to 0 if none
 
 ═══ EXTRA FEES (extraFees) ═══
-• NET of all fees added ON TOP of the subtotal: delivery + service fee + surcharges
-• If a fee has a matching credit/discount (e.g. "Delivery $5.49" AND "Delivery Discount -$5.49"), they cancel out — net = 0
-• Result must be >= 0
-• CRITICAL — do NOT add GST/tax to extraFees if receipt says "including GST", "incl. GST $X", "GST included in prices" — that tax is already inside the item prices
-• Only include tax that is a SEPARATE line explicitly ADDED to the subtotal (rare)
+• NET fees added ON TOP of the subtotal: delivery fee + service fee + surcharges
+• SUBTRACT matching credits (e.g. "Delivery $5.49" + "Delivery Discount -$5.49" = net 0)
+• Result >= 0
+• CRITICAL: "Including GST", "incl. GST $X", "GST included" = tax already in item prices, do NOT add to extraFees
+• Only add tax shown as a SEPARATE line explicitly added to the subtotal
 
 Return ONLY the JSON object. Nothing else.`;
 
@@ -101,7 +102,7 @@ export async function parseReceiptImage(
     parsed.items = (parsed.items ?? []).map(item => ({
       name: String(item.name ?? 'Item'),
       price: Math.abs(Number(item.price) || 0),
-      productDiscount: Number(item.productDiscount) || 0,
+      productDiscount: Math.abs(Number(item.productDiscount) || 0), // dollar amount
     }));
     return parsed;
   } catch {

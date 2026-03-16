@@ -63,16 +63,20 @@ export async function parseReceiptImage(
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       max_tokens: 2048,
-      temperature: 0.1,
+      temperature: 0,
       messages: [
+        {
+          role: 'system',
+          content: 'You are a precise receipt OCR and parser. You carefully read every line of a receipt image, paying special attention to discount lines that appear directly below product lines. You always return valid JSON only.',
+        },
         {
           role: 'user',
           content: [
             {
               type: 'image_url',
-              image_url: { url: `data:${mimeType};base64,${base64Image}` },
+              image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' },
             },
             { type: 'text', text: PROMPT },
           ],

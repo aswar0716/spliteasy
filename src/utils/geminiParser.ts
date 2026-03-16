@@ -13,25 +13,42 @@ export type ParsedItem = {
   productDiscount: number; // % off (0 if none)
 };
 
-const PROMPT = `You are a receipt parser. Analyse this receipt image and return ONLY valid JSON (no markdown, no explanation) in this exact format:
-{
-  "items": [
-    { "name": "string", "price": number, "productDiscount": number }
-  ],
-  "storeDiscount": number,
-  "voucher": number,
-  "extraFees": number
-}
+const PROMPT = `You are an expert receipt parser for a bill-splitting app. Read the ENTIRE receipt carefully before producing output. Return ONLY valid JSON — no markdown, no explanation, no extra text.
 
-Rules:
-- "items" = only purchased products/food items — never fees, never totals, never subtotals
-- "price" = the original shelf price BEFORE any discount on that item
-- "productDiscount" = % off for that specific item (0 if none). IMPORTANT: if a negative line like "WW Product Discount -$X", "Member Savings -$X", "Promo -$X" immediately follows an item, it is a per-item discount — calculate productDiscount = (X / item_price) * 100 and apply it to that item. Do NOT include such lines separately.
-- "storeDiscount" = overall store/member discount % applied to all items simultaneously (0 if none). Woolworths Everyday Rewards = 5 or 10.
-- "voucher" = flat dollar voucher or reward code deducted at checkout (0 if none)
-- "extraFees" = NET extra fees ADDED ON TOP of the subtotal: delivery fee + service fee + surcharges. SUBTRACT any credits on those fees. Result must be >= 0.
-  CRITICAL: GST / tax shown as "including GST", "incl. GST", or "GST included in prices" is already inside the item prices — do NOT add it to extraFees. Only add tax that is a SEPARATE line added to the subtotal.
-- Return ONLY the JSON object, nothing else`;
+Output format:
+{"items":[{"name":"string","price":number,"productDiscount":number}],"storeDiscount":number,"voucher":number,"extraFees":number}
+
+═══ ITEMS ═══
+• Include ONLY purchased products/food/grocery lines
+• "price" = the original shelf/list price BEFORE any discount (always positive)
+• "productDiscount" = % discount on THIS specific item:
+  - Look for a negative line printed DIRECTLY BELOW the item it belongs to (same product block)
+  - These are labelled things like: "WW Discount", "WW Product Discount", "Half Price Save", "Member Price Save", "Promo Save", "Loyalty Save", "Discount -$X"
+  - Formula: productDiscount = round((discountAmount / originalPrice) × 100, 1)
+  - Example: "Eggs $6.50" then "WW Discount -$0.60" → price=6.50, productDiscount=9.2
+  - If no per-item discount exists, set productDiscount=0
+• NEVER include totals, subtotals, GST notes, fee lines, or discount summary lines as items
+
+═══ STORE DISCOUNT (storeDiscount) ═══
+• A single % off applied to ALL items at once (e.g. Everyday Rewards 5% or 10%)
+• Usually labelled "5% off your shop", "Member Discount 10%", "Rewards Discount"
+• Set to 0 if not present
+
+═══ VOUCHER (voucher) ═══
+• Flat $ amount taken off the bill total — appear in the TOTALS SECTION, not next to a specific item
+• Examples: "Voucher -$10", "Gift Card -$20", "$5 Everyday Rewards", "Promo Code -$3", "Discount -$X" in totals
+• Also include any general discount lines in the totals section that are NOT per-item
+• Sum all such deductions; always return a POSITIVE number (e.g. receipt shows -$5 → set 5)
+• Set to 0 if none
+
+═══ EXTRA FEES (extraFees) ═══
+• NET of all fees added ON TOP of the subtotal: delivery + service fee + surcharges
+• If a fee has a matching credit/discount (e.g. "Delivery $5.49" AND "Delivery Discount -$5.49"), they cancel out — net = 0
+• Result must be >= 0
+• CRITICAL — do NOT add GST/tax to extraFees if receipt says "including GST", "incl. GST $X", "GST included in prices" — that tax is already inside the item prices
+• Only include tax that is a SEPARATE line explicitly ADDED to the subtotal (rare)
+
+Return ONLY the JSON object. Nothing else.`;
 
 export async function parseReceiptImage(
   base64Image: string,

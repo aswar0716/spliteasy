@@ -4,6 +4,12 @@ export type Friend = {
   color: string;
 };
 
+export type Group = {
+  id: string;
+  name: string;
+  memberIds: string[]; // friend IDs (excludes 'me' — me is always included)
+};
+
 // ─── Woolworths ───────────────────────────────────────────────────────────────
 
 export type WoolworthsItem = {

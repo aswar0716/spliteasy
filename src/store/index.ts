@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Friend, HistoryEntry, JournalEntry } from '../types';
+import { Friend, Group, HistoryEntry, JournalEntry } from '../types';
 import { Colors } from '../theme';
 
 const KEYS = {
   friends: '@spliteasy/friends',
+  groups: '@spliteasy/groups',
   history: '@spliteasy/history',
   journal: '@spliteasy/journal',
   geminiKey: '@spliteasy/geminiKey',
@@ -12,6 +13,7 @@ const KEYS = {
 
 type AppStore = {
   friends: Friend[];
+  groups: Group[];
   history: HistoryEntry[];
   journal: JournalEntry[];
   geminiKey: string;
@@ -20,6 +22,9 @@ type AppStore = {
   addFriend: (name: string) => void;
   removeFriend: (id: string) => void;
   renameFriend: (id: string, name: string) => void;
+
+  saveGroup: (name: string, memberIds: string[]) => void;
+  removeGroup: (id: string) => void;
 
   addHistory: (entry: HistoryEntry) => void;
   removeHistory: (id: string) => void;
@@ -52,6 +57,7 @@ async function load<T>(key: string, fallback: T): Promise<T> {
 
 export const useStore = create<AppStore>((set, get) => ({
   friends: [],
+  groups: [],
   history: [],
   journal: [],
   geminiKey: '',
@@ -78,6 +84,20 @@ export const useStore = create<AppStore>((set, get) => ({
     );
     set({ friends: updated });
     persist(KEYS.friends, updated);
+  },
+
+  saveGroup: (name: string, memberIds: string[]) => {
+    const existing = get().groups;
+    const newGroup: Group = { id: genId(), name: name.trim(), memberIds };
+    const updated = [...existing, newGroup];
+    set({ groups: updated });
+    persist(KEYS.groups, updated);
+  },
+
+  removeGroup: (id: string) => {
+    const updated = get().groups.filter(g => g.id !== id);
+    set({ groups: updated });
+    persist(KEYS.groups, updated);
   },
 
   addHistory: (entry: HistoryEntry) => {
@@ -123,12 +143,13 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   hydrate: async () => {
-    const [friends, history, journal, geminiKeyRaw] = await Promise.all([
+    const [friends, groups, history, journal, geminiKeyRaw] = await Promise.all([
       load<Friend[]>(KEYS.friends, []),
+      load<Group[]>(KEYS.groups, []),
       load<HistoryEntry[]>(KEYS.history, []),
       load<JournalEntry[]>(KEYS.journal, []),
       AsyncStorage.getItem(KEYS.geminiKey),
     ]);
-    set({ friends, history, journal, geminiKey: geminiKeyRaw ?? '', hydrated: true });
+    set({ friends, groups, history, journal, geminiKey: geminiKeyRaw ?? '', hydrated: true });
   },
 }));

@@ -124,7 +124,7 @@ export default function BillEntryScreen() {
 
   // ── Scan receipt ─────────────────────────────────────────────────────────
 
-  const handleScan = async () => {
+  const checkApiKey = (): boolean => {
     if (!geminiKey) {
       Alert.alert(
         'API Key Required',
@@ -134,23 +134,17 @@ export default function BillEntryScreen() {
           { text: 'Go to Settings', onPress: () => navigation.navigate('Settings') },
         ],
       );
-      return;
+      return false;
     }
+    return true;
+  };
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      base64: true,
-      quality: 0.8,
-    });
-
-    if (result.canceled || !result.assets[0].base64) return;
-
-    const asset = result.assets[0];
+  const processReceiptAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset.base64) return;
     setScanning(true);
-
     try {
       const mimeType = asset.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
-      const parsed = await parseReceiptImage(asset.base64!, mimeType, geminiKey);
+      const parsed = await parseReceiptImage(asset.base64, mimeType, geminiKey);
 
       const newItems: BillItem[] = parsed.items.map(i => ({
         id: genId(),
@@ -171,6 +165,31 @@ export default function BillEntryScreen() {
       Alert.alert('Scan failed', e.message ?? 'Try a clearer photo.');
     } finally {
       setScanning(false);
+    }
+  };
+
+  const handleGallery = async () => {
+    if (!checkApiKey()) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], base64: true, quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await processReceiptAsset(result.assets[0]);
+    }
+  };
+
+  const handleCamera = async () => {
+    if (!checkApiKey()) return;
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Camera permission needed', 'Allow camera access in your device settings.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'], base64: true, quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await processReceiptAsset(result.assets[0]);
     }
   };
 
@@ -301,30 +320,58 @@ export default function BillEntryScreen() {
           />
         </View>
 
-        {/* Scan button */}
-        <Pressable
-          onPress={handleScan}
-          disabled={scanning}
-          style={({ pressed }) => ({
+        {/* Scan / Upload */}
+        {scanning ? (
+          <View style={{
             flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
             gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg,
-            borderWidth: 1.5, borderColor: Colors.primary, borderStyle: 'dashed',
-            backgroundColor: pressed ? Colors.primary + '15' : Colors.primary + '08',
-            opacity: scanning ? 0.7 : 1,
-          })}
-        >
-          {scanning ? <ActivityIndicator color={Colors.primary} /> : <AppText style={{ fontSize: 22 }}>📷</AppText>}
-          <View>
-            <AppText style={{ color: Colors.primary, fontWeight: FontWeight.semibold, fontSize: FontSize.md }}>
-              {scanning ? 'Scanning receipt...' : 'Scan Receipt with AI'}
+            backgroundColor: Colors.primary + '10', borderWidth: 1, borderColor: Colors.primary + '40',
+          }}>
+            <ActivityIndicator color={Colors.primary} />
+            <AppText style={{ color: Colors.primary, fontWeight: FontWeight.semibold, fontSize: FontSize.sm }}>
+              Reading receipt…
             </AppText>
-            {!scanning && (
-              <AppText style={{ color: Colors.textMuted, fontSize: FontSize.xs }}>
-                Auto-detects items, discounts & fees
-              </AppText>
-            )}
           </View>
-        </Pressable>
+        ) : (
+          <View style={{ gap: Spacing.sm }}>
+            <AppText style={{
+              color: Colors.textMuted, fontSize: FontSize.xs,
+              fontWeight: FontWeight.semibold, textTransform: 'uppercase', letterSpacing: 0.8,
+            }}>
+              Scan / Upload Receipt
+            </AppText>
+            <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+              <Pressable
+                onPress={handleCamera}
+                style={({ pressed }) => ({
+                  flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                  gap: Spacing.sm, paddingVertical: Spacing.md,
+                  borderRadius: Radius.lg, borderWidth: 1.5,
+                  borderColor: Colors.primary, backgroundColor: pressed ? Colors.primary + '20' : Colors.primary + '0C',
+                })}
+              >
+                <AppText style={{ fontSize: 20 }}>📷</AppText>
+                <AppText style={{ color: Colors.primary, fontWeight: FontWeight.bold, fontSize: FontSize.sm }}>
+                  Take Photo
+                </AppText>
+              </Pressable>
+              <Pressable
+                onPress={handleGallery}
+                style={({ pressed }) => ({
+                  flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                  gap: Spacing.sm, paddingVertical: Spacing.md,
+                  borderRadius: Radius.lg, borderWidth: 1.5,
+                  borderColor: Colors.border, backgroundColor: pressed ? Colors.surface : 'transparent',
+                })}
+              >
+                <AppText style={{ fontSize: 20 }}>🖼️</AppText>
+                <AppText style={{ color: Colors.textSecondary, fontWeight: FontWeight.bold, fontSize: FontSize.sm }}>
+                  Upload
+                </AppText>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         {/* Items */}
         <View style={{ gap: Spacing.sm }}>

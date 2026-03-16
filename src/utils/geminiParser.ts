@@ -21,12 +21,21 @@ Output format:
 ═══ ITEMS ═══
 • Include ONLY purchased product/food/grocery lines — NOT fees, totals, subtotals, or discount summary lines
 • "price" = the original shelf/list price BEFORE any discount (always a positive number)
-• "productDiscount" = the discount DOLLAR AMOUNT for THIS specific item (NOT a percentage):
-  - A negative line printed DIRECTLY BELOW or adjacent to the item in the same product block = that item's discount
-  - Labels: "WW Discount", "WW Product Discount", "Half Price Save", "Promo Save", "Member Price Save", "Loyalty Save"
-  - Example: "Eggs $6.50" then "WW Discount -$0.60" → price=6.50, productDiscount=0.60
-  - productDiscount is always POSITIVE (e.g. if receipt shows -$0.60, set 0.60)
-  - Set to 0 if no per-item discount for this product
+• "productDiscount" = the discount DOLLAR AMOUNT for THIS specific item. Check BOTH patterns:
+
+  PATTERN A — Next line discount:
+  A negative line printed DIRECTLY BELOW the item belongs to that item.
+  Labels: "WW Discount", "WW Product Discount", "Half Price Save", "Promo Save", "Member Price Save", "Loyalty Save", "Special Save", any line with a negative $ directly under a product.
+  Example: "Eggs  $6.50" / "WW Discount  -$0.60" → price=6.50, productDiscount=0.60
+
+  PATTERN B — Strikethrough / two prices on same line:
+  When an item shows TWO prices — one crossed out (original) and one active (sale price) — OR shows "Was $X Now $Y".
+  Use the HIGHER (original/crossed-out) price as "price" and the DIFFERENCE as "productDiscount".
+  Example: "Chicken  ~~$12.00~~  $9.00" → price=12.00, productDiscount=3.00
+  Example: "Milk  Was $3.50  Now $2.80" → price=3.50, productDiscount=0.70
+
+  • productDiscount is always POSITIVE
+  • Set to 0 if no discount applies to this item
 
 ═══ STORE DISCOUNT % (storeDiscount) ═══
 • ONLY for a PERCENTAGE discount applied to ALL items at once via membership

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "spliteasy",
+    "name": "SplitEasy",
     "slug": "spliteasy",
     "owner": "weezy07",
     "version": "1.0.0",
@@ -13,20 +13,37 @@
       "backgroundColor": "#0F0F14"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.weezy07.spliteasy"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0F0F14",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.weezy07.spliteasy"
+      "package": "com.weezy07.spliteasy",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.INTERNET"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/bb190434-d9ab-4900-a56a-a4827d445c51"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     },
     "extra": {
       "eas": {
@@ -38,7 +55,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow SplitEasy to read your receipt photos."
+          "photosPermission": "Allow SplitEasy to access your photos to scan receipts.",
+          "cameraPermission": "Allow SplitEasy to use your camera to photograph receipts."
         }
       ]
     ]

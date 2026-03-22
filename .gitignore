@@ -40,3 +40,4 @@ yarn-error.*
 /ios
 /android
 JOURNAL.md
+google-service-account.json

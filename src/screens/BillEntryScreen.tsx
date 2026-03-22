@@ -41,6 +41,8 @@ export default function BillEntryScreen() {
   const [items, setItems] = useState<BillItem[]>([]);
   const [sessionLabel, setSessionLabel] = useState('');
   const [storeDiscount, setStoreDiscount] = useState<0 | 5 | 10>(0);
+
+  const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
   const [voucher, setVoucher] = useState('0');
   const [extraFees, setExtraFees] = useState('0');
   const [scanning, setScanning] = useState(false);
@@ -377,11 +379,11 @@ export default function BillEntryScreen() {
               </View>
             ))}
           </View>
-          {/* Editable label */}
+          {/* Editable label + suggestions */}
           <TextInput
             value={sessionLabel}
             onChangeText={setSessionLabel}
-            placeholder="Name this split (e.g. DoorDash Friday night…)"
+            placeholder="Name this split…"
             placeholderTextColor={Colors.textMuted}
             style={{
               color: Colors.textPrimary, fontSize: FontSize.sm,
@@ -389,6 +391,37 @@ export default function BillEntryScreen() {
               paddingBottom: 4, paddingTop: 2,
             }}
           />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: 2 }}>
+            {[
+              storeDiscount > 0 ? `Woolies · ${dateStr}` : null,
+              parseFloat(extraFees) > 0 ? `Delivery · ${dateStr}` : null,
+              `Split · ${dateStr}`,
+            ]
+              .filter(Boolean)
+              .map(s => (
+                <Pressable
+                  key={s}
+                  onPress={() => setSessionLabel(s!)}
+                  style={({ pressed }) => ({
+                    paddingVertical: 3, paddingHorizontal: Spacing.sm,
+                    borderRadius: Radius.full,
+                    borderWidth: 1,
+                    borderColor: sessionLabel === s ? Colors.primary : Colors.border,
+                    backgroundColor: sessionLabel === s
+                      ? Colors.primary + '22'
+                      : pressed ? Colors.surface : 'transparent',
+                  })}
+                >
+                  <AppText style={{
+                    fontSize: FontSize.xs,
+                    color: sessionLabel === s ? Colors.primary : Colors.textMuted,
+                    fontWeight: sessionLabel === s ? FontWeight.semibold : FontWeight.regular,
+                  }}>
+                    {s}
+                  </AppText>
+                </Pressable>
+              ))}
+          </View>
         </View>
 
         {/* Scan / Upload */}

@@ -117,6 +117,8 @@ export default function SummaryScreen() {
 
   // ── Splitwise ──────────────────────────────────────────────────────────────
 
+  const [payerId, setPayerId] = useState<string>('me');
+
   const [swLoading, setSwLoading] = useState(false);
   const [swModal, setSwModal] = useState(false);
   const [swPosting, setSwPosting] = useState(false);
@@ -160,27 +162,47 @@ export default function SummaryScreen() {
     if (!swCurrentUser) return;
     setSwPosting(true);
     try {
-      // Build entries: me pays full cost, everyone owes their share
-      // Unmatched friends → their amount added to "me" owed_share
-      let myOwedShare = 0;
-      const entries: { userId: number; owedShare: number; paidShare: number }[] = [];
-
-      for (const m of mapping) {
-        if (m.isMe) {
-          myOwedShare += m.split.total;
-        } else if (m.matched) {
-          entries.push({ userId: m.matched.id, owedShare: m.split.total, paidShare: 0 });
-        } else {
-          // Unmatched: add to my share
-          myOwedShare += m.split.total;
+      // Find the Splitwise user ID of the payer
+      let payerSwId = swCurrentUser.id; // default: me
+      if (payerId !== 'me') {
+        const payerMapping = mapping.find(m => m.split.friendId === payerId);
+        if (payerMapping?.matched) {
+          payerSwId = payerMapping.matched.id;
         }
+        // If payer isn't matched in Splitwise, fall back to current user
       }
 
-      // Me: paid everything, owed my share
-      entries.unshift({
-        userId: swCurrentUser.id,
-        paidShare: result.grandTotal,
-        owedShare: myOwedShare,
+      // Build entries: payer pays full cost, everyone owes their share
+      // Unmatched friends → their amount added to payer's owed_share
+      const entries: { userId: number; owedShare: number; paidShare: number }[] = [];
+      const userEntries: Map<number, { owedShare: number; paidShare: number }> = new Map();
+
+      for (const m of mapping) {
+        const swId = m.isMe ? swCurrentUser.id : m.matched?.id ?? null;
+        if (!swId) continue; // unmatched: skip (absorbed into payer)
+        const existing = userEntries.get(swId) ?? { owedShare: 0, paidShare: 0 };
+        userEntries.set(swId, {
+          owedShare: existing.owedShare + m.split.total,
+          paidShare: existing.paidShare,
+        });
+      }
+
+      // Handle unmatched: add their amounts to payer's owed share
+      const unmatchedTotal = mapping
+        .filter(m => !m.isMe && !m.matched)
+        .reduce((s, m) => s + m.split.total, 0);
+      if (unmatchedTotal > 0) {
+        const existing = userEntries.get(payerSwId) ?? { owedShare: 0, paidShare: 0 };
+        userEntries.set(payerSwId, { ...existing, owedShare: existing.owedShare + unmatchedTotal });
+      }
+
+      // Set payer's paidShare = grandTotal
+      userEntries.forEach((v, id) => {
+        entries.push({
+          userId: id,
+          owedShare: v.owedShare,
+          paidShare: id === payerSwId ? result.grandTotal : 0,
+        });
       });
 
       await createSplitwiseExpense(
@@ -246,6 +268,59 @@ export default function SummaryScreen() {
             />
           ))}
         </View>
+
+        {/* Who paid? */}
+        <Card>
+          <AppText style={{
+            color: Colors.textMuted, fontSize: FontSize.xs, fontWeight: FontWeight.semibold,
+            textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: Spacing.sm,
+          }}>
+            Who paid the bill?
+          </AppText>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm }}>
+            {sorted.map(split => {
+              const isSelected = payerId === split.friendId;
+              const color = split.friendId === 'me' ? Colors.primary
+                : friends.find(f => f.id === split.friendId)?.color ?? Colors.primary;
+              const displayName = split.name === 'Me' ? 'You' : split.name;
+              const initials = displayName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
+              return (
+                <Pressable
+                  key={split.friendId}
+                  onPress={() => setPayerId(split.friendId)}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+                    paddingVertical: Spacing.xs, paddingHorizontal: Spacing.md,
+                    borderRadius: Radius.full, borderWidth: 1.5,
+                    borderColor: isSelected ? color : Colors.border,
+                    backgroundColor: isSelected ? color + '22' : 'transparent',
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <View style={{
+                    width: 24, height: 24, borderRadius: 12,
+                    backgroundColor: isSelected ? color : Colors.surface,
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <AppText style={{ color: isSelected ? '#fff' : Colors.textMuted, fontSize: 9, fontWeight: FontWeight.bold }}>
+                      {initials}
+                    </AppText>
+                  </View>
+                  <AppText style={{
+                    color: isSelected ? color : Colors.textSecondary,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.regular,
+                    fontSize: FontSize.sm,
+                  }}>
+                    {displayName}
+                  </AppText>
+                  {isSelected && (
+                    <AppText style={{ color: color, fontSize: 10 }}>✓</AppText>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
 
         {/* Actions */}
         <View style={{ gap: Spacing.sm }}>

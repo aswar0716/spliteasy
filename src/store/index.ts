@@ -9,6 +9,7 @@ const KEYS = {
   history: '@spliteasy/history',
   journal: '@spliteasy/journal',
   geminiKey: '@spliteasy/geminiKey',
+  splitwiseKey: '@spliteasy/splitwiseKey',
 };
 
 type AppStore = {
@@ -17,6 +18,7 @@ type AppStore = {
   history: HistoryEntry[];
   journal: JournalEntry[];
   geminiKey: string;
+  splitwiseKey: string;
   hydrated: boolean;
 
   addFriend: (name: string) => void;
@@ -34,6 +36,7 @@ type AppStore = {
   removeJournalEntry: (id: string) => void;
 
   setGeminiKey: (key: string) => void;
+  setSplitwiseKey: (key: string) => void;
 
   hydrate: () => Promise<void>;
 };
@@ -61,6 +64,7 @@ export const useStore = create<AppStore>((set, get) => ({
   history: [],
   journal: [],
   geminiKey: '',
+  splitwiseKey: '',
   hydrated: false,
 
   addFriend: (name: string) => {
@@ -142,14 +146,25 @@ export const useStore = create<AppStore>((set, get) => ({
     AsyncStorage.setItem(KEYS.geminiKey, key);
   },
 
+  setSplitwiseKey: (key: string) => {
+    set({ splitwiseKey: key });
+    AsyncStorage.setItem(KEYS.splitwiseKey, key);
+  },
+
   hydrate: async () => {
-    const [friends, groups, history, journal, geminiKeyRaw] = await Promise.all([
+    const [friends, groups, history, journal, geminiKeyRaw, splitwiseKeyRaw] = await Promise.all([
       load<Friend[]>(KEYS.friends, []),
       load<Group[]>(KEYS.groups, []),
       load<HistoryEntry[]>(KEYS.history, []),
       load<JournalEntry[]>(KEYS.journal, []),
       AsyncStorage.getItem(KEYS.geminiKey),
+      AsyncStorage.getItem(KEYS.splitwiseKey),
     ]);
-    set({ friends, groups, history, journal, geminiKey: geminiKeyRaw ?? '', hydrated: true });
+    set({
+      friends, groups, history, journal,
+      geminiKey: geminiKeyRaw ?? '',
+      splitwiseKey: splitwiseKeyRaw ?? '',
+      hydrated: true,
+    });
   },
 }));

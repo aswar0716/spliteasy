@@ -128,7 +128,7 @@ function KeyCard({
 }
 
 export default function SettingsScreen() {
-  const { geminiKey, setGeminiKey, splitwiseKey, setSplitwiseKey } = useStore();
+  const { geminiKey, setGeminiKey, splitwiseKey, setSplitwiseKey, loadDemoData } = useStore();
   const [testingSpliwise, setTestingSplitwise] = useState(false);
 
   const handleTestSplitwise = async () => {
@@ -184,6 +184,28 @@ export default function SettingsScreen() {
             style={{ marginTop: -Spacing.sm }}
           />
         ) : null}
+
+        {/* Demo Data */}
+        <Card>
+          <SectionHeader title="Demo" />
+          <AppText variant="bodySmall" style={{ marginBottom: Spacing.md }}>
+            Load sample friends, groups, and bill history to explore the app.
+          </AppText>
+          <PillButton
+            label="Load Demo Data"
+            onPress={() => {
+              Alert.alert(
+                'Load Demo Data',
+                'This will add sample friends, groups, and history. Your existing data and API keys won\'t be affected. Continue?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Load', onPress: () => loadDemoData().then(() => Alert.alert('Done ✓', 'Demo data loaded.')) },
+                ],
+              );
+            }}
+            variant="secondary"
+          />
+        </Card>
 
         {/* About */}
         <Card>

@@ -186,9 +186,60 @@ export default function BillEntryScreen() {
     if (!checkApiKey()) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], base64: true, quality: 0.85,
+      allowsMultipleSelection: true,
     });
-    if (!result.canceled && result.assets[0]) {
-      await processReceiptAsset(result.assets[0]);
+    if (result.canceled || !result.assets.length) return;
+
+    setScanning(true);
+    try {
+      // Parse all selected images and collect items from this batch
+      let batchItems: BillItem[] = [];
+      let batchVoucher = 0;
+      let batchFees = 0;
+      let batchStoreDiscount: 0 | 5 | 10 = 0;
+
+      for (const asset of result.assets) {
+        if (!asset.base64) continue;
+        const mimeType = asset.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+        const parsed = await parseReceiptImage(asset.base64, mimeType, geminiKey);
+        const mapped: BillItem[] = parsed.items.map(i => ({
+          id: genId(),
+          name: i.name,
+          price: i.price.toFixed(2),
+          productDiscount: i.productDiscount > 0 ? String(i.productDiscount) : '0',
+          assignedTo: [],
+        }));
+        batchItems = [...batchItems, ...mapped];
+        batchVoucher += parsed.voucher ?? 0;
+        batchFees += Math.max(0, parsed.extraFees ?? 0);
+        if (parsed.storeDiscount === 5 || parsed.storeDiscount === 10) batchStoreDiscount = parsed.storeDiscount;
+      }
+
+      // Deduplicate within this batch (overlapping screenshots of the same bill)
+      const dedupedBatch: BillItem[] = [];
+      for (const item of batchItems) {
+        const alreadyInBatch = dedupedBatch.some(
+          ex =>
+            ex.name.trim().toLowerCase() === item.name.trim().toLowerCase() &&
+            Math.abs(parseFloat(ex.price) - parseFloat(item.price)) < 0.01,
+        );
+        if (!alreadyInBatch) dedupedBatch.push(item);
+      }
+
+      const skipped = batchItems.length - dedupedBatch.length;
+      setItems(prev => [...prev, ...dedupedBatch]);
+      if (batchStoreDiscount > 0) setStoreDiscount(batchStoreDiscount);
+      if (batchVoucher > 0) setVoucher(prev => ((parseFloat(prev) || 0) + batchVoucher).toFixed(2));
+      if (batchFees > 0) setExtraFees(prev => ((parseFloat(prev) || 0) + batchFees).toFixed(2));
+
+      const msg = skipped > 0
+        ? `Added ${dedupedBatch.length} items (removed ${skipped} duplicate${skipped > 1 ? 's' : ''} from overlapping screenshots).`
+        : `Found ${dedupedBatch.length} items across ${result.assets.length} photo${result.assets.length > 1 ? 's' : ''}.`;
+      Alert.alert('✅ Scanned!', msg);
+    } catch (e: any) {
+      Alert.alert('Scan failed', e.message ?? 'Try a clearer photo.');
+    } finally {
+      setScanning(false);
     }
   };
 

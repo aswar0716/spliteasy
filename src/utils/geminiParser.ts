@@ -38,25 +38,28 @@ Output format:
   • Set to 0 if no discount applies to this item
 
 ═══ STORE DISCOUNT % (storeDiscount) ═══
-• ONLY for a PERCENTAGE discount applied to ALL items at once via membership
-• Labels: "Everyday Rewards 5%", "10% off your shop", "Member Discount 10%"
-• Set to 5 or 10 (Woolworths) or the relevant %, or 0 if none
-• Do NOT use this for dollar-amount discounts
+For percentage-based discounts applied across the whole bill. Two ways to detect:
+  A) Explicitly stated %: "Everyday Rewards 5%", "10% off your shop", "Member Discount 10%" → use that %
+  B) Dollar amount that IS a % discount: "Team Discount -$X", "Everyday Rewards -$X", "Member Discount -$X" where the amount ÷ item subtotal ≈ 5% or 10% → set storeDiscount to 5 or 10
+• Allowed values: 0, 5, 10 (round to nearest of these)
+• If detected as storeDiscount, do NOT also add to voucher
 
-═══ DISCOUNTS & VOUCHERS (voucher) ═══
-This field captures ALL flat-dollar deductions that appear in the TOTALS section — both general discounts AND payment vouchers. Sum them all into one number.
-TWO TYPES that both go here:
-  1. DISCOUNTS (in the totals/savings section): "Team Discount -$X", "Additional Discount -$X", "Member Discount -$X", "Savings -$X", "Promotional Discount -$X"
-  2. VOUCHERS/PAYMENTS (in the payment section at the bottom): "Voucher -$X", "Gift Card -$X", "Reward Dollars -$X", "Promo Code -$X", "eVoucher -$X"
-• Sum ALL of the above into voucher; always return a POSITIVE number
-• Set to 0 if none
+═══ VOUCHERS (voucher) ═══
+ONLY flat-dollar deductions that are NOT percentage-based store discounts.
+  • INCLUDE: "Voucher -$X", "Gift Card -$X", "Reward Dollars -$X", "Promo Code -$X", "eVoucher -$X", "Membership Benefit -$X", "Special Offers -$X", flat promotional credits in the payment section
+  • EXCLUDE: anything already captured as storeDiscount
+  • EXCLUDE: fee-related discounts (e.g. "Delivery Discount") — those net against fees, not here
+  • EXCLUDE: promotional SUMMARY banners (e.g. "$14.65 Uber One savings and other promotions applied", "Total savings: $X") — these are display summaries, NOT individual discount lines
+• Sum only individual itemised lines; always return a POSITIVE number. Set to 0 if none.
 
 ═══ EXTRA FEES (extraFees) ═══
 • NET fees added ON TOP of the subtotal: delivery fee + service fee + surcharges
-• SUBTRACT matching credits (e.g. "Delivery $5.49" + "Delivery Discount -$5.49" = net 0)
+• SUBTRACT matching fee credits from the same fee type:
+  e.g. "Delivery Fee $9.49" + "Delivery Discount -$9.49" = net $0 for delivery
+  e.g. "Service Fee $3.43" with no credit = +$3.43
 • Result >= 0
-• CRITICAL: "Including GST", "incl. GST $X", "GST included" = tax already in item prices, do NOT add to extraFees
-• Only add tax shown as a SEPARATE line explicitly added to the subtotal
+• Do NOT include fee-related discounts in voucher — they belong here as a reduction
+• CRITICAL: "Including GST", "incl. GST $X", "GST included", "#Total includes GST" = tax already in item prices — do NOT add to extraFees
 
 Return ONLY the JSON object. Nothing else.`;
 
